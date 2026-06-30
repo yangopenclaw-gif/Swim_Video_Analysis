@@ -1,0 +1,5 @@
+uploads/*.mp4 filter=lfs diff=lfs merge=lfs -text
+models/pose_landmarker_heavy.task filter=lfs diff=lfs merge=lfs -text
+yolov8n.pt filter=lfs diff=lfs merge=lfs -text
+data/swim_analysis.db filter=lfs diff=lfs merge=lfs -text
+frontend/dist/** filter=lfs diff=lfs merge=lfs -text

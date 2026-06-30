@@ -3,19 +3,11 @@ __pycache__/
 *.pyo
 .pytest_cache/
 *.egg-info/
-dist/
 build/
 *.egg
 
 node_modules/
 frontend/node_modules/
-frontend/dist/
-
-uploads/
-data/swim_analysis.db
-
-models/pose_landmarker_heavy.task
-yolov8n.pt
 
 .codeartsdoer/
 .arts/
