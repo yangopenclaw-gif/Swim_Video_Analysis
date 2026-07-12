@@ -1,0 +1,23 @@
+# 成熟开源算法引擎 - 可选依赖
+# 安装全部：pip install -r requirements-optional.txt
+# 按需安装：pip install PyWavelets hmmlearn
+
+# 小波变换引擎（转身断裂检测、CWT划水、CWT打腿）
+PyWavelets>=1.5.0
+
+# HMM引擎（HMM转身、HMM划水、HMM换气）
+hmmlearn>=0.3.0
+
+# DTW引擎（DTW划水模板匹配）
+dtw-python>=1.3.0
+
+# ActionFormer时序动作检测引擎（转身检测）
+# 注意：mmaction2安装较重，建议按需安装
+# mmaction2>=1.2.0
+
+# RTMPose高精度姿态估计引擎
+# 注意：mmpose安装较重，建议按需安装
+# mmpose>=1.3.0
+
+# ONNX Runtime（RTMPose ONNX推理，比MMPose更轻量）
+# onnxruntime>=1.17.0

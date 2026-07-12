@@ -14,3 +14,9 @@ frontend/node_modules/
 *.tar.gz
 .env
 *.log
+
+staging/data/
+staging/uploads/
+staging/avatars/
+uploads/.chunks/
+data/thumbnails/
