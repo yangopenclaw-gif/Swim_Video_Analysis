@@ -246,5 +246,5 @@ fun UploadScreenFull(
 }
 
 private fun Modifier.width(dp: androidx.compose.ui.unit.Dp) = this.then(
-    androidx.compose.foundation.layout.Modifier.padding(start = dp)
+    androidx.compose.ui.Modifier.padding(start = dp)
 )

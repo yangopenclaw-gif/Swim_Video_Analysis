@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonElement
 @Serializable
 data class UploadInitRequest(
     val filename: String,
-    val file_size: Long,
+    @SerialName("file_size") val fileSize: Long,
     @SerialName("athlete_name") val athleteName: String = "",
     @SerialName("display_name") val displayName: String = "",
     @SerialName("competition_name") val competitionName: String = ""
@@ -267,7 +267,7 @@ data class SaveMarkerResultRequest(
     @SerialName("pool_length") val poolLength: Int = 50,
     @SerialName("race_distance") val raceDistance: Int = 50,
     @SerialName("stroke_type") val strokeType: String = "自由泳",
-    @SerialName("result") val result: Map<String, Any>
+    @SerialName("result") val result: Map<String, String>
 )
 
 @Serializable

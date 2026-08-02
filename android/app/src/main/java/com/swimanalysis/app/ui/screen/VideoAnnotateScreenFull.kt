@@ -233,5 +233,5 @@ fun VideoAnnotateScreenFull(
 }
 
 private fun Modifier.weight(f: Float) = this.then(
-    androidx.compose.foundation.layout.Modifier.fillMaxWidth(f)
+    androidx.compose.ui.Modifier.fillMaxWidth(f)
 )
