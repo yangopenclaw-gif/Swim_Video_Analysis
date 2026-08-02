@@ -132,18 +132,19 @@ export const TimelineMarker: React.FC<TimelineMarkerProps> = ({
   const handleMarkerMouseDown = (e: React.MouseEvent, markerId: string) => {
     e.stopPropagation()
     setDragging(markerId)
+    let latestTime: number | null = null
     const handleMove = (ev: MouseEvent) => {
       if (!trackRef.current || !duration) return
       const rect = trackRef.current.getBoundingClientRect()
       const x = ev.clientX - rect.left
       const ratio = Math.max(0, Math.min(1, x / rect.width))
       const newTime = ratio * duration
+      latestTime = newTime
       setMarkers(prev => prev.map(m => m.id === markerId ? { ...m, marker_time: newTime } : m))
     }
     const handleUp = () => {
       setDragging(null)
-      const marker = markers.find(m => m.id === markerId)
-      if (marker) updateMarkerTime(markerId, marker.marker_time)
+      if (latestTime != null) updateMarkerTime(markerId, latestTime)
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
     }

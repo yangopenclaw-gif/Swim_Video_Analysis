@@ -22,7 +22,7 @@ const OPTIONS_50M_25POOL: string[] = OPTIONS_100M
 
 interface AnalysisResult { [key: string]: any }
 
-interface Record {
+interface SwimRecord {
   id: string
   swimmer_name: string
   pool_length: number
@@ -37,7 +37,7 @@ interface Record {
   linked_video_id?: string | null
 }
 
-type PageType = 'home' | 'records' | 'record-detail' | 'video' | 'compare' | 'entry'
+type PageType = 'home' | 'records' | 'record-detail' | 'video' | 'compare' | 'entry' | 'comp-manager'
 type UploadPhase = 'idle' | 'uploading' | 'uploaded' | 'analyzing' | 'completed' | 'failed'
 
 const parseHash = (): { page: PageType; swimmer?: string; subPage?: string; videoId?: string } => {
@@ -52,6 +52,7 @@ const parseHash = (): { page: PageType; swimmer?: string; subPage?: string; vide
   if (p0 === 'video') return { page: 'video', videoId: parts[1] }
   if (p0 === 'entry') return { page: 'entry' }
   if (p0 === 'compare') return { page: 'compare' }
+  if (p0 === 'comp-manager') return { page: 'comp-manager' }
   return { page: 'home' }
 }
 
@@ -62,6 +63,7 @@ const navigateTo = (page: PageType, extra?: { swimmer?: string; subPage?: string
   else if (page === 'video') hash = `#/video${extra?.videoId ? '/' + extra.videoId : ''}`
   else if (page === 'entry') hash = '#/entry'
   else if (page === 'compare') hash = '#/compare'
+  else if (page === 'comp-manager') hash = '#/comp-manager'
   else hash = '#/'
   window.location.hash = hash
 }
@@ -78,13 +80,13 @@ function App() {
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
-  const [records, setRecords] = useState<Record[]>([])
+  const [records, setRecords] = useState<SwimRecord[]>([])
   const [showArchiveModal, setShowArchiveModal] = useState(false)
   const [archiveForm, setArchiveForm] = useState({ race_name: '', race_date: '', race_location: '' })
   const [compareId1, setCompareId1] = useState('')
   const [compareId2, setCompareId2] = useState('')
   const [compareData, setCompareData] = useState<any>(null)
-  const [allRecords, setAllRecords] = useState<Record[]>([])
+  const [allRecords, setAllRecords] = useState<SwimRecord[]>([])
   const [analyzeProgress, setAnalyzeProgress] = useState(0)
   const [analyzeMessage, setAnalyzeMessage] = useState('')
 
@@ -113,7 +115,7 @@ function App() {
   })
   const [analyzeVideoOptions, setAnalyzeVideoOptions] = useState<string[]>([])
   const [analyzeVideoStep, setAnalyzeVideoStep] = useState<'params' | 'options'>('params')
-  const [editingRecord, setEditingRecord] = useState<Record | null>(null)
+  const [editingRecord, setEditingRecord] = useState<SwimRecord | null>(null)
   const [editPassword, setEditPassword] = useState('')
   const [editError, setEditError] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'record' | 'video'; id: string; password: string; error: string } | null>(null)
@@ -121,8 +123,8 @@ function App() {
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set())
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [recordSubPage, setRecordSubPage] = useState<'list' | 'detail' | 'result'>('list')
-  const [selectedComp, setSelectedComp] = useState<{ name: string; date: string | null; location: string | null; records: Record[] } | null>(null)
-  const [selectedEvent, setSelectedEvent] = useState<Record | null>(null)
+  const [selectedComp, setSelectedComp] = useState<{ name: string; date: string | null; location: string | null; records: SwimRecord[] } | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<SwimRecord | null>(null)
   const [liked, setLiked] = useState(false)
   const [popularity, setPopularity] = useState(0)
   const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set())
@@ -156,17 +158,41 @@ function App() {
     return () => window.removeEventListener('hashchange', handler)
   }, [])
 
+  const allSwimmerNames = () => {
+    const names = new Set<string>(['杨钧涵', '杨涴婷'])
+    allRecords.forEach(r => { if (r.swimmer_name) names.add(r.swimmer_name) })
+    records.forEach(r => { if (r.swimmer_name) names.add(r.swimmer_name) })
+    return Array.from(names)
+  }
+
+  const selectSwimmerForRecords = (name: string) => {
+    if (name === '__add__') {
+      const newName = prompt('请输入新运动员姓名')
+      if (newName) {
+        setSelectedSwimmer(newName)
+        setPage('record-detail', { swimmer: newName })
+      }
+    } else {
+      setSelectedSwimmer(name)
+      setPage('record-detail', { swimmer: name })
+    }
+  }
+
   useEffect(() => {
     const pending = VideoUploader.getPendingUploads()
     if (pending.length > 0) {
       setPendingUploads(pending)
     }
+  }, [])
+
+  useEffect(() => {
     allSwimmerNames().forEach(name => {
+      if (swimmerAvatars[name]) return
       fetch(`${API_BASE}/swimmer_profile/${encodeURIComponent(name)}`).then(r => r.ok ? r.json() : null).then(d => {
         if (d?.avatar_url) setSwimmerAvatars(prev => ({ ...prev, [name]: d.avatar_url }))
       }).catch(() => {})
     })
-  }, [])
+  }, [allRecords, records])
 
   useEffect(() => {
     if (page === 'record-detail') {
@@ -183,6 +209,9 @@ function App() {
     if (page === 'entry') {
       fetchAllRecords()
     }
+    if (page === 'comp-manager') {
+      fetchCompetitions()
+    }
   }, [page, selectedSwimmer])
 
   useEffect(() => {
@@ -191,6 +220,12 @@ function App() {
       if (firstYear) setExpandedYears(new Set([firstYear]))
     }
   }, [records])
+
+  useEffect(() => {
+    return () => {
+      if (analyzeIntervalRef.current) clearInterval(analyzeIntervalRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (raceDistance === 50 && poolLength === 50) {
@@ -730,7 +765,7 @@ function App() {
         <div className="card-title"><span className="icon">🔍</span> 选择分析内容</div>
         <div className="select-all-bar">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={selectedOptions.length === options.length} onChange={selectAll} />
+            <input type="checkbox" checked={selectedOptions.length === options.length} onChange={() => selectedOptions.length === options.length ? deselectAll() : selectAll()} />
             全选
           </label>
           <button className="btn btn-sm btn-outline" onClick={selectAll}>全选</button>
@@ -754,9 +789,9 @@ function App() {
         <button
           className="btn btn-primary"
           onClick={handleAnalyze}
-          disabled={selectedOptions.length === 0 || uploadPhase === 'analyzing'}
+          disabled={selectedOptions.length === 0 || (uploadPhase as string) === 'analyzing'}
         >
-          {uploadPhase === 'analyzing' ? '分析中...' : '即时分析'}
+          {(uploadPhase as string) === 'analyzing' ? '分析中...' : '即时分析'}
         </button>
       </div>
     )
@@ -876,12 +911,12 @@ function App() {
   const renderEditRecordModal = () => {
     if (!editingRecord) return null
     const r = editingRecord
-    const updateField = (key: string, val: any) => setEditingRecord({ ...r, [key]: val } as Record)
-    const updateMetric = (key: string, val: any) => setEditingRecord({ ...r, analysis_result: { ...r.analysis_result, [key]: val } } as Record)
+    const updateField = (key: string, val: any) => setEditingRecord({ ...r, [key]: val } as SwimRecord)
+    const updateMetric = (key: string, val: any) => setEditingRecord({ ...r, analysis_result: { ...r.analysis_result, [key]: val } } as SwimRecord)
     const removeMetric = (key: string) => {
       const newResult = { ...r.analysis_result }
       delete newResult[key]
-      setEditingRecord({ ...r, analysis_result: newResult } as Record)
+      setEditingRecord({ ...r, analysis_result: newResult } as SwimRecord)
     }
     const editNumHalves = Math.max(1, r.race_distance / 50)
     const editHalfLabels = Array.from({ length: editNumHalves }, (_, i) => `第${i + 1}半程`)
@@ -989,7 +1024,7 @@ function App() {
       )
     }
 
-    const byYear: { [year: string]: Record[] } = {}
+    const byYear: { [year: string]: SwimRecord[] } = {}
     records.forEach(r => {
       let year = '未知年份'
       if (r.race_date && r.race_date.length >= 4) year = r.race_date.substring(0, 4)
@@ -1009,7 +1044,7 @@ function App() {
     return (
       <div className="card" style={{ overflow: 'visible' }}>
         <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span><span className="icon">�</span> 比赛记录列表</span>
+          <span><span className="icon">📋</span> 比赛记录列表</span>
           {swimmerProfile?.birth_date && (
             <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-secondary)', background: 'var(--primary-light)', padding: '3px 10px', borderRadius: 12 }}>
               出生日期：{swimmerProfile.birth_date}
@@ -1020,7 +1055,7 @@ function App() {
           {years.map(year => {
             const isYearOpen = expandedYears.has(year)
             const yearRecords = byYear[year]
-            const byComp: { [comp: string]: Record[] } = {}
+            const byComp: { [comp: string]: SwimRecord[] } = {}
             yearRecords.forEach(r => {
               const comp = r.race_name || '未命名比赛'
               if (!byComp[comp]) byComp[comp] = []
@@ -1100,6 +1135,7 @@ function App() {
         </div>
       </div>
     )
+
   }
 
   const renderVideoManager = () => (
@@ -1269,16 +1305,17 @@ function App() {
     input.style.display = 'none'
     input.onchange = (ev) => {
       const file = (ev.target as HTMLInputElement).files?.[0]
+      if (document.body.contains(input)) document.body.removeChild(input)
       if (!file) return
       const url = URL.createObjectURL(file)
       setCropModal({ imageUrl: url, name })
       setCropArea(null)
       setCropPos({ x: 0, y: 0 })
       setCropZoom(1)
-      document.body.removeChild(input)
     }
     document.body.appendChild(input)
     input.click()
+    setTimeout(() => { if (document.body.contains(input)) document.body.removeChild(input) }, 60000)
   }
 
   const onCropComplete = useCallback((_croppedArea: any, croppedAreaPixels: any) => {
@@ -1334,7 +1371,7 @@ function App() {
   }
 
   const renderRecordDetailPage = () => {
-    const byYear: { [year: string]: Record[] } = {}
+    const byYear: { [year: string]: SwimRecord[] } = {}
     records.forEach(r => {
       let year = '未知'
       if (r.race_date && r.race_date.length >= 4) year = r.race_date.substring(0, 4)
@@ -1346,7 +1383,7 @@ function App() {
     })
     const years = Object.keys(byYear).sort((a, b) => b.localeCompare(a))
 
-    const byComp: { [key: string]: { name: string; date: string | null; location: string | null; records: Record[] } } = {}
+    const byComp: { [key: string]: { name: string; date: string | null; location: string | null; records: SwimRecord[] } } = {}
     records.forEach(r => {
       const compName = r.race_name || '未命名比赛'
       const compDate = r.race_date || null
@@ -1502,11 +1539,14 @@ function App() {
                   {halfLabels.map((label, idx) => {
                     const t = ar[`${label}用时`]
                     if (t == null) return null
+                    const prevLabel = idx > 0 ? `${halfLabels[idx - 1]}用时` : null
+                    const prevT = prevLabel ? ar[prevLabel] : null
+                    const diff = idx > 0 && prevT != null ? t - prevT : null
                     return (
                       <tr key={label}>
                         <td>{(idx + 1) * 50}m</td>
                         <td style={{ fontFamily: "'SF Mono', Menlo, Monaco, monospace" }}>{formatTime(t)}</td>
-                        <td>{idx === 0 ? '-' : formatTime(t)}</td>
+                        <td>{diff != null ? formatTime(diff) : '-'}</td>
                       </tr>
                     )
                   })}
@@ -1545,7 +1585,7 @@ function App() {
               </div>
             )}
             {r.linked_video_id && (
-              <div className="m-data-card" style={{ cursor: 'pointer' }} onClick={() => { setPage('video', { videoId: r.linked_video_id }) }}>
+              <div className="m-data-card" style={{ cursor: 'pointer' }} onClick={() => { setPage('video', { videoId: r.linked_video_id || undefined }) }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: '1.2rem' }}>🎥</span>
                   <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--primary)' }}>查看关联视频</span>
@@ -1577,27 +1617,61 @@ function App() {
     </div>
   )
 
-  const [comp1Swimmer, setComp1Swimmer] = useState('')
-  const [comp1Year, setComp1Year] = useState('')
-  const [comp1Race, setComp1Race] = useState('')
-  const [comp1Event, setComp1Event] = useState('')
-  const [comp2Swimmer, setComp2Swimmer] = useState('')
-  const [comp2Year, setComp2Year] = useState('')
-  const [comp2Race, setComp2Race] = useState('')
-  const [comp2Event, setComp2Event] = useState('')
+  const [compSlots, setCompSlots] = useState<{ recordId: string }[]>([{ recordId: '' }, { recordId: '' }])
+  const [compTimelineRecords, setCompTimelineRecords] = useState<any[]>([])
+  const [compLoading, setCompLoading] = useState(false)
+  const [compEvaluation, setCompEvaluation] = useState('')
+  const [compEvaluating, setCompEvaluating] = useState(false)
+  const [compEditId, setCompEditId] = useState<string | null>(null)
+  const [compEditForm, setCompEditForm] = useState({ name: '', date: '', location: '' })
+  const [competitions, setCompetitions] = useState<Competition[]>([])
+  const [compPwModal, setCompPwModal] = useState<{ action: string; compId: string; compName: string } | null>(null)
+  const [compPwInput, setCompPwInput] = useState('')
+  const [compPwError, setCompPwError] = useState('')
+
+  const fetchCompetitions = () => {
+    fetch(`${API_BASE}/competitions`).then(r => r.ok ? r.json() : []).then((d: any[]) => {
+      setCompetitions(d.map(c => ({ id: c.id, name: c.name, date: c.date || null, location: c.location || null })))
+    }).catch(() => {})
+  }
   const compareRef = useRef<HTMLDivElement>(null)
 
   const getYear = (r: any) => { if (r.race_date && r.race_date.length >= 4) return r.race_date.substring(0, 4); if (r.race_name) { const m = r.race_name.match(/(\d{4})年/); if (m) return m[1] } return '未知' }
 
   const compSwimmers = [...new Set(allRecords.map(r => r.swimmer_name))]
-  const comp1Years = comp1Swimmer ? [...new Set(allRecords.filter(r => r.swimmer_name === comp1Swimmer).map(getYear))].sort((a, b) => b.localeCompare(a)) : []
-  const comp1Races = (comp1Swimmer && comp1Year) ? [...new Map(allRecords.filter(r => r.swimmer_name === comp1Swimmer && getYear(r) === comp1Year).map(r => [r.race_name || '未命名', r.race_name || '未命名'])).values()] : []
-  const comp1Events = (comp1Swimmer && comp1Year && comp1Race) ? allRecords.filter(r => r.swimmer_name === comp1Swimmer && getYear(r) === comp1Year && (r.race_name || '未命名') === comp1Race) : []
-  const comp2Years = comp2Swimmer ? [...new Set(allRecords.filter(r => r.swimmer_name === comp2Swimmer).map(getYear))].sort((a, b) => b.localeCompare(a)) : []
-  const comp2Races = (comp2Swimmer && comp2Year) ? [...new Map(allRecords.filter(r => r.swimmer_name === comp2Swimmer && getYear(r) === comp2Year).map(r => [r.race_name || '未命名', r.race_name || '未命名'])).values()] : []
-  const comp2Events = (comp2Swimmer && comp2Year && comp2Race) ? allRecords.filter(r => r.swimmer_name === comp2Swimmer && getYear(r) === comp2Year && (r.race_name || '未命名') === comp2Race) : []
 
-  const formatCompTime = (s: number) => { if (s < 60) return s.toFixed(2) + '秒'; const m = Math.floor(s / 60); const sec = s % 60; return m + '分' + sec.toFixed(2).padStart(5, '0') + '秒' }
+
+  const formatCompTime2 = (s: number) => { if (s < 60) return s.toFixed(2) + '秒'; const m = Math.floor(s / 60); const sec = s % 60; return m + '分' + sec.toFixed(2).padStart(5, '0') + '秒' }
+  const getVal = (ar: any, key: string) => { const v = ar[key]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }
+  const diffColor = (d: number | null, lowerBetter: boolean = true) => {
+    if (d == null) return '#999'
+    if (d === 0) return '#999'
+    const improved = lowerBetter ? d < 0 : d > 0
+    return improved ? '#16a34a' : '#dc2626'
+  }
+  const monthsDiff = (d1: string, d2: string) => {
+    if (!d1 || !d2 || d1.length < 7 || d2.length < 7) return null
+    const [y1, m1] = d1.substring(0, 7).split('-').map(Number)
+    const [y2, m2] = d2.substring(0, 7).split('-').map(Number)
+    return (y2 - y1) * 12 + (m2 - m1)
+  }
+
+  const handleTimelineCompare = async () => {
+    const ids = compSlots.map(s => s.recordId).filter(Boolean)
+    if (ids.length < 2) { alert('请至少选择2条记录'); return }
+    const recs = ids.map(id => allRecords.find(r => r.id === id)).filter(Boolean) as SwimRecord[]
+    const strokes = [...new Set(recs.map(r => r.stroke_type))]
+    const dists = [...new Set(recs.map(r => r.race_distance))]
+    if (strokes.length > 1 || dists.length > 1) { alert('所选记录必须是同一项目（泳姿+距离）'); return }
+    setCompLoading(true)
+    setCompEvaluation('')
+    try {
+      const res = await fetch(`${API_BASE}/compare_timeline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_ids: ids }) })
+      if (res.ok) { const data = await res.json(); setCompTimelineRecords(data.records || recs) }
+      else { setCompTimelineRecords(recs) }
+    } catch { setCompTimelineRecords(recs) }
+    setCompLoading(false)
+  }
 
   const handleCompareDownload = async () => {
     if (!compareRef.current) return
@@ -1622,198 +1696,254 @@ function App() {
   }
 
 
+
+  const handleCompEditStart = (comp: Competition) => {
+    setCompEditId(comp.id)
+    setCompEditForm({ name: comp.name, date: comp.date || '', location: comp.location || '' })
+  }
+
+  const handleCompEditSave = async () => {
+    if (!compEditId) return
+    try {
+      const res = await fetch(`${API_BASE}/competitions/${compEditId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(compEditForm)
+      })
+      if (res.ok) {
+        setCompEditId(null)
+        fetchCompetitions()
+      } else {
+        const d = await res.json().catch(() => ({}))
+        alert(d.detail || '更新失败')
+      }
+    } catch { alert('网络错误') }
+  }
+
+  const handleCompDelete = async () => {
+    if (!compPwModal) return
+    if (compPwInput !== 'ycz') {
+      setCompPwError('密码错误')
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE}/competitions/${compPwModal.compId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setCompPwModal(null)
+        setCompPwInput('')
+        setCompPwError('')
+        fetchCompetitions()
+      } else {
+        const d = await res.json().catch(() => ({}))
+        alert(d.detail || '删除失败')
+      }
+    } catch { alert('网络错误') }
+  }
+
+  const [compManagerExpanded, setCompManagerExpanded] = useState<Set<string>>(new Set())
+
+  const renderCompManagerPage = () => {
+    const byYearMonth: { [key: string]: Competition[] } = {}
+    competitions.forEach(comp => {
+      let ym = '未知时间'
+      if (comp.date && comp.date.length >= 7) {
+        ym = comp.date.substring(0, 7)
+      } else if (comp.date && comp.date.length >= 4) {
+        ym = comp.date.substring(0, 4)
+      }
+      if (!byYearMonth[ym]) byYearMonth[ym] = []
+      byYearMonth[ym].push(comp)
+    })
+    const sortedKeys = Object.keys(byYearMonth).sort((a, b) => b.localeCompare(a))
+
+    const toggleGroup = (key: string) => {
+      setCompManagerExpanded(prev => {
+        const n = new Set(prev)
+        n.has(key) ? n.delete(key) : n.add(key)
+        return n
+      })
+    }
+
+    const formatYearMonth = (key: string) => {
+      if (key.length === 7) {
+        const [y, m] = key.split('-')
+        return `${y}年${parseInt(m)}月`
+      }
+      if (key.length === 4) return `${key}年`
+      return key
+    }
+
+    return (
+      <div className="swimmer-page-bg">
+        <div className="container" style={{ paddingTop: 16, paddingBottom: 40 }}>
+          {competitions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>暂无比赛数据</div>
+          ) : sortedKeys.map(ym => {
+            const isOpen = compManagerExpanded.has(ym)
+            const ymComps = byYearMonth[ym]
+            return (
+              <div key={ym} style={{ marginBottom: 10 }}>
+                <div
+                  onClick={() => toggleGroup(ym)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 14px',
+                    background: 'linear-gradient(135deg, #1a73e8 0%, #1557b0 100%)',
+                    borderRadius: 8, cursor: 'pointer', userSelect: 'none',
+                    boxShadow: '0 2px 4px rgba(26,115,232,0.2)',
+                  }}
+                >
+                  <span style={{ color: '#fff', fontSize: '0.7rem', transition: 'transform 0.2s', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                  <span style={{ color: '#fff', fontWeight: 700, fontSize: '1rem', letterSpacing: 1 }}>{formatYearMonth(ym)}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.8rem', marginLeft: 4 }}>{ymComps.length}项比赛</span>
+                </div>
+                {isOpen && (
+                  <div style={{ marginLeft: 12, marginTop: 6, borderLeft: '3px solid #e8f0fe', paddingLeft: 12 }}>
+                    {ymComps.map(comp => (
+                      <div key={comp.id} style={{ marginBottom: 8, padding: '12px 14px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        {compEditId === comp.id ? (
+                          <>
+                            <div className="form-row" style={{ marginBottom: 8 }}>
+                              <div className="form-group"><label>比赛名称</label><input style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%' }} value={compEditForm.name} onChange={e => setCompEditForm(p => ({ ...p, name: e.target.value }))} /></div>
+                              <div className="form-group"><label>日期</label><input type="date" style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%' }} value={compEditForm.date} onChange={e => setCompEditForm(p => ({ ...p, date: e.target.value }))} /></div>
+                              <div className="form-group"><label>地点</label><input style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%' }} value={compEditForm.location} onChange={e => setCompEditForm(p => ({ ...p, location: e.target.value }))} /></div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button className="btn btn-sm btn-primary" onClick={handleCompEditSave}>保存</button>
+                              <button className="btn btn-sm btn-outline" onClick={() => setCompEditId(null)}>取消</button>
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{comp.name}</div>
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{comp.date || '未设日期'}{comp.location ? ' · ' + comp.location : ''}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button className="btn btn-sm btn-outline" onClick={() => handleCompEditStart(comp)}>编辑</button>
+                              <button className="btn btn-sm btn-outline" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => { setCompPwModal({ action: 'delete', compId: comp.id, compName: comp.name }); setCompPwInput(''); setCompPwError('') }}>删除</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {compPwModal && (
+        <div onClick={() => { setCompPwModal(null); setCompPwInput(''); setCompPwError('') }} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-card)', borderRadius: 12, padding: 20, maxWidth: 360, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginBottom: 12, fontSize: '1rem' }}>确认删除比赛</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 8 }}>比赛：{compPwModal.compName}</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--danger)', marginBottom: 12 }}>此操作不可恢复，请输入密码确认</p>
+            <input type="password" value={compPwInput} onChange={e => { setCompPwInput(e.target.value); setCompPwError('') }} placeholder="请输入密码" style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', marginBottom: 8 }} />
+            {compPwError && <div style={{ fontSize: '0.8rem', color: 'var(--danger)', marginBottom: 8 }}>{compPwError}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-sm btn-outline" onClick={() => { setCompPwModal(null); setCompPwInput(''); setCompPwError('') }}>取消</button>
+              <button className="btn btn-sm btn-primary" style={{ background: 'var(--danger)' }} onClick={handleCompDelete}>确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    )
+  }
+
   const renderComparePage = () => {
+    const slotColors = ['#4F95FF', '#10B981', '#9333EA', '#F59E0B', '#EF4444', '#EC4899']
+    const slotBgs = ['#EFF6FF', '#ECFDF5', '#F5F3FF', '#FFFBEB', '#FEF2F2', '#FDF2F8']
     const S: React.CSSProperties = { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%' }
+
     return (
     <>
       <div className="card">
         <div className="card-title"><span className="icon">⚖️</span> 对比分析</div>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 16 }}>
-          分别选择两条记录进行逐项对比
-        </p>
-        <div style={{ marginBottom: 12, padding: '10px 12px', background: '#EFF6FF', borderRadius: 8, border: '1px solid #BFDBFE' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1677FF', marginBottom: 8 }}>📋 记录 1</div>
-          <div className="form-row" style={{ marginBottom: 8 }}>
-            <div className="form-group">
-              <label>运动员</label>
-              <select style={S} value={comp1Swimmer} onChange={e => { setComp1Swimmer(e.target.value); setComp1Year(''); setComp1Race(''); setComp1Event(''); setCompareData(null) }}>
-                <option value="">请选择</option>
-                {compSwimmers.map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 12 }}>选择2-6条同项目记录进行逐项对比</p>
+        {compSlots.map((slot, idx) => (
+          <div key={idx} style={{ marginBottom: 8, padding: '8px 12px', background: slotBgs[idx % 6], borderRadius: 6, border: `1px solid ${slotColors[idx % 6]}40` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: slotColors[idx % 6], flexShrink: 0 }} />
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: slotColors[idx % 6] }}>记录 {idx + 1}</span>
+              {compSlots.length > 2 && <button className="btn btn-sm btn-outline" style={{ padding: '1px 6px', fontSize: '0.7rem' }} onClick={() => setCompSlots(prev => prev.filter((_, i) => i !== idx))}>移除</button>}
             </div>
-            <div className="form-group">
-              <label>年份</label>
-              <select style={S} value={comp1Year} onChange={e => { setComp1Year(e.target.value); setComp1Race(''); setComp1Event(''); setCompareData(null) }} disabled={!comp1Swimmer}>
-                <option value="">请选择</option>
-                {comp1Years.map(y => <option key={y} value={y}>{y}年</option>)}
-              </select>
-            </div>
+            <select style={S} value={slot.recordId} onChange={e => { const n = [...compSlots]; n[idx] = { recordId: e.target.value }; setCompSlots(n) }}>
+              <option value="">选择记录...</option>
+              {allRecords.map(r => <option key={r.id} value={r.id}>{r.swimmer_name} - {r.race_name || '未命名'} - {r.stroke_type}{r.race_distance}m ({getYear(r)})</option>)}
+            </select>
           </div>
-          <div className="form-row" style={{ marginBottom: 8 }}>
-            <div className="form-group">
-              <label>比赛</label>
-              <select style={S} value={comp1Race} onChange={e => { setComp1Race(e.target.value); setComp1Event(''); setCompareData(null) }} disabled={!comp1Year}>
-                <option value="">请选择</option>
-                {comp1Races.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>项目</label>
-              <select style={S} value={comp1Event} onChange={e => { setComp1Event(e.target.value); setCompareData(null) }} disabled={!comp1Race}>
-                <option value="">请选择</option>
-                {comp1Events.map(r => <option key={r.id} value={r.id}>{r.race_distance}米{r.stroke_type}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-        <div style={{ marginBottom: 12, padding: '10px 12px', background: '#ECFDF5', borderRadius: 8, border: '1px solid #A7F3D0' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#10B981', marginBottom: 8 }}>📋 记录 2</div>
-          <div className="form-row" style={{ marginBottom: 8 }}>
-            <div className="form-group">
-              <label>运动员</label>
-              <select style={S} value={comp2Swimmer} onChange={e => { setComp2Swimmer(e.target.value); setComp2Year(''); setComp2Race(''); setComp2Event(''); setCompareData(null) }}>
-                <option value="">请选择</option>
-                {compSwimmers.map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>年份</label>
-              <select style={S} value={comp2Year} onChange={e => { setComp2Year(e.target.value); setComp2Race(''); setComp2Event(''); setCompareData(null) }} disabled={!comp2Swimmer}>
-                <option value="">请选择</option>
-                {comp2Years.map(y => <option key={y} value={y}>{y}年</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="form-row" style={{ marginBottom: 8 }}>
-            <div className="form-group">
-              <label>比赛</label>
-              <select style={S} value={comp2Race} onChange={e => { setComp2Race(e.target.value); setComp2Event(''); setCompareData(null) }} disabled={!comp2Year}>
-                <option value="">请选择</option>
-                {comp2Races.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>项目</label>
-              <select style={S} value={comp2Event} onChange={e => { setComp2Event(e.target.value); setCompareData(null) }} disabled={!comp2Race}>
-                <option value="">请选择</option>
-                {comp2Events.map(r => <option key={r.id} value={r.id}>{r.race_distance}米{r.stroke_type}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-        <button className="btn btn-primary" onClick={() => { setCompareId1(comp1Event); setCompareId2(comp2Event); handleCompare() }} disabled={!comp1Event || !comp2Event || comp1Event === comp2Event} style={{ width: '100%' }}>
-          开始对比
-        </button>
+        ))}
+        {compSlots.length < 6 && <button className="btn btn-sm btn-outline" onClick={() => setCompSlots(prev => [...prev, { recordId: '' }])} style={{ marginBottom: 12 }}>+ 添加记录</button>}
+        <button className="btn btn-primary" onClick={handleTimelineCompare} disabled={compLoading} style={{ marginLeft: 8 }}>{compLoading ? '对比中...' : '开始对比'}</button>
       </div>
 
-      {compareData && (() => {
-        const r1 = compareData.record1
-        const r2 = compareData.record2
-        const ar1 = r1.analysis_result || {}
-        const ar2 = r2.analysis_result || {}
-        const halfKeys = Array.from({ length: 8 }, (_, i) => i + 1).map(i => ({
-          time: `第${i}半程用时`, stroke: `第${i}半程划水次数`, breath: `第${i}半程换气次数`, kick: `第${i}半程打腿次数`
-        })).filter(h => ar1[h.time] != null || ar2[h.time] != null)
-        const totalKey = '比赛总用时'
-        const getVal = (ar: any, key: string) => { const v = ar[key]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }
-        const diffColor = (d: number | null, lowerBetter: boolean = true) => {
-          if (d == null) return '#999'
-          if (d === 0) return '#999'
-          const improved = lowerBetter ? d < 0 : d > 0
-          return improved ? '#10B981' : '#F53F3F'
-        }
-        return (
-          <div className="card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div className="card-title" style={{ marginBottom: 0 }}><span className="icon">📊</span> 对比结果</div>
-              <button className="btn btn-sm btn-outline" onClick={handleCompareDownload} style={{ color: 'var(--primary)' }}>📥 下载图片</button>
-            </div>
-            <div ref={compareRef} style={{ background: '#fff', padding: 16, borderRadius: 12 }}>
-              <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1A1A1A' }}>成绩对比</div>
-              </div>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                {[r1, r2].map((rec, idx) => (
-                  <div key={idx} style={{ flex: 1, background: idx === 0 ? '#EFF6FF' : '#ECFDF5', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#86909C' }}>记录 {idx + 1}</div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, marginTop: 2 }}>{rec.swimmer_name}</div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600, marginTop: 2 }}>{rec.race_distance}米{rec.stroke_type}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#86909C', marginTop: 2 }}>{rec.race_name || ''}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#86909C', marginTop: 1 }}>{rec.race_date || ''}</div>
-                  </div>
-                ))}
-              </div>
-              {getVal(ar1, totalKey) != null && getVal(ar2, totalKey) != null && (() => {
-                const t1 = getVal(ar1, totalKey)!, t2 = getVal(ar2, totalKey)!, d = t2 - t1
-                return (
-                  <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '12px 16px', marginBottom: 16, textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#86909C', marginBottom: 6 }}>总成绩</div>
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 24 }}>
-                      <div><div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#1677FF' }}>{formatCompTime(t1)}</div></div>
-                      <div style={{ fontSize: '1.2rem', color: '#999' }}>VS</div>
-                      <div><div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10B981' }}>{formatCompTime(t2)}</div></div>
-                    </div>
-                    <div style={{ marginTop: 8, fontSize: '0.9rem', fontWeight: 600, color: diffColor(d) }}>
-                      {d > 0 ? '+' : ''}{d.toFixed(2)}秒 {d < 0 ? '进步' : d > 0 ? '退步' : '持平'}
-                    </div>
-                  </div>
-                )
-              })()}
-              {halfKeys.map((h, idx) => {
-                const ht1 = getVal(ar1, h.time), ht2 = getVal(ar2, h.time)
-                const hs1 = getVal(ar1, h.stroke), hs2 = getVal(ar2, h.stroke)
-                const hb1 = getVal(ar1, h.breath), hb2 = getVal(ar2, h.breath)
-                const hk1 = getVal(ar1, h.kick), hk2 = getVal(ar2, h.kick)
-                const td = (ht1 != null && ht2 != null) ? ht2! - ht1! : null
-                return (
-                  <div key={idx} style={{ background: idx % 2 === 0 ? '#F7F8FA' : '#fff', borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1677FF', marginBottom: 6 }}>第{idx + 1}半程（{(idx + 1) * 50}米）</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, fontSize: '0.8rem' }}>
-                      <div style={{ color: '#86909C' }}>指标</div>
-                      <div style={{ textAlign: 'center', color: '#1677FF' }}>记录1</div>
-                      <div style={{ textAlign: 'center', color: '#10B981' }}>记录2</div>
-                      {ht1 != null || ht2 != null ? (<><div>用时</div><div style={{ textAlign: 'center' }}>{ht1 != null ? ht1.toFixed(2) : '-'}</div><div style={{ textAlign: 'center' }}>{ht2 != null ? ht2.toFixed(2) : '-'}</div></>) : null}
-                      {hs1 != null || hs2 != null ? (<><div>划水</div><div style={{ textAlign: 'center' }}>{hs1 ?? '-'}</div><div style={{ textAlign: 'center' }}>{hs2 ?? '-'}</div></>) : null}
-                      {hb1 != null || hb2 != null ? (<><div>换气</div><div style={{ textAlign: 'center' }}>{hb1 ?? '-'}</div><div style={{ textAlign: 'center' }}>{hb2 ?? '-'}</div></>) : null}
-                      {hk1 != null || hk2 != null ? (<><div>打腿</div><div style={{ textAlign: 'center' }}>{hk1 ?? '-'}</div><div style={{ textAlign: 'center' }}>{hk2 ?? '-'}</div></>) : null}
-                    </div>
-                    {td != null && (
-                      <div style={{ marginTop: 4, fontSize: '0.78rem', fontWeight: 600, color: diffColor(td) }}>
-                        用时差: {td > 0 ? '+' : ''}{td.toFixed(2)}秒 {td < 0 ? '进步' : td > 0 ? '退步' : '持平'}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+      {compTimelineRecords.length >= 2 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title"><span className="icon">📊</span> 对比结果</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: 'var(--bg)' }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '2px solid var(--border)', position: 'sticky', left: 0, background: 'var(--bg)', zIndex: 2, minWidth: 100 }}>指标</th>
+                  {compTimelineRecords.map((r: any, i: number) => (
+                    <th key={i} style={{ padding: '8px 10px', textAlign: 'center', borderBottom: '2px solid var(--border)', color: slotColors[i % 6], minWidth: 100 }}>
+                      {r.swimmer_name}<br/><span style={{ fontSize: '0.72rem', fontWeight: 400 }}>{r.race_name || '未命名'} ({r.race_date?.substring(0, 10) || getYear(r)})</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const maxHalves = Math.max(...compTimelineRecords.map((r: any) => r.analysis_result ? Object.keys(r.analysis_result).filter(k => k.includes('用时')).length : 0))
+                  const rows: { label: string; values: (number | null)[]; isTime: boolean }[] = []
+                  rows.push({ label: '总用时', values: compTimelineRecords.map((r: any) => { const v = r.total_time; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }), isTime: true })
+                  for (let h = 0; h < maxHalves; h++) {
+                    const halfLabel = `第${h + 1}半程`
+                    rows.push({ label: `${halfLabel}用时`, values: compTimelineRecords.map((r: any) => { const v = r.analysis_result?.[`${halfLabel}用时`]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }), isTime: true })
+                    rows.push({ label: `${halfLabel}划水次数`, values: compTimelineRecords.map((r: any) => { const v = r.analysis_result?.[`${halfLabel}划水次数`]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }), isTime: false })
+                    rows.push({ label: `${halfLabel}换气次数`, values: compTimelineRecords.map((r: any) => { const v = r.analysis_result?.[`${halfLabel}换气次数`]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }), isTime: false })
+                    rows.push({ label: `${halfLabel}打腿次数`, values: compTimelineRecords.map((r: any) => { const v = r.analysis_result?.[`${halfLabel}打腿次数`]; return v != null ? (typeof v === 'number' ? v : parseFloat(v)) : null }), isTime: false })
+                  }
+                  return rows.map((row, ri) => (
+                    <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : 'var(--bg)' }}>
+                      <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)', fontWeight: 500, position: 'sticky', left: 0, background: ri % 2 === 0 ? '#fff' : 'var(--bg)', zIndex: 1 }}>{row.label}</td>
+                      {row.values.map((v: number | null, ci: number) => {
+                        const base = row.values[0]
+                        const diff = (v != null && base != null && ci > 0) ? v - base : null
+                        const improved = row.isTime ? (diff != null && diff < 0) : (diff != null && diff > 0)
+                        const diffColor = diff == null ? '#999' : diff === 0 ? '#999' : improved ? '#16a34a' : '#dc2626'
+                        return (
+                          <td key={ci} style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)', textAlign: 'center', color: diff != null ? diffColor : 'inherit' }}>
+                            {v != null ? (row.isTime ? formatCompTime2(v) : v) : '-'}
+                            {diff != null && ci > 0 && <span style={{ fontSize: '0.7rem', marginLeft: 4 }}>({diff > 0 ? '+' : ''}{row.isTime ? diff.toFixed(2) : diff})</span>}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))
+                })()}
+              </tbody>
+            </table>
           </div>
-        )
-      })()}
+          <div style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={async () => {
+              setCompEvaluating(true); setCompEvaluation('')
+              const ids = compTimelineRecords.map((r: any) => r.id)
+              try {
+                const res = await fetch(`${API_BASE}/compare_evaluate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_ids: ids }) })
+                if (res.ok) { const d = await res.json(); setCompEvaluation(d.evaluation || '暂无评价') }
+                else { setCompEvaluation('评价生成失败') }
+              } catch { setCompEvaluation('网络错误') }
+              setCompEvaluating(false)
+            }} disabled={compEvaluating}>{compEvaluating ? 'AI评价中...' : '🤖 AI教练评价'}</button>
+            {compEvaluation && <div style={{ marginTop: 10, padding: '12px 14px', background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)', fontSize: '0.85rem', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{compEvaluation}</div>}
+          </div>
+        </div>
+      )}
     </>
-  )
-  }
-
-
-  const [extraSwimmers, setExtraSwimmers] = useState<string[]>([])
-
-  const allSwimmerNames = () => {
-    const names = ['杨钧涵', '杨涴婷']
-    extraSwimmers.forEach(n => { if (!names.includes(n)) names.push(n) })
-    return names
-  }
-
-  const swimmerColors = ['#4F95FF', '#10B981', '#9333EA', '#F59E0B', '#EF4444', '#EC4899']
-
-  const selectSwimmerForRecords = (name: string) => {
-    if (name === '__add__') {
-      const inputName = prompt('请输入运动员姓名：')
-      if (!inputName || allSwimmerNames().includes(inputName)) return
-      setExtraSwimmers(prev => [...prev, inputName])
-      setSelectedSwimmer(inputName)
-    } else {
-      setSelectedSwimmer(name)
-    }
-    setPage('record-detail', { swimmer: name })
+    )
   }
 
   const renderHomePage = () => (
@@ -1848,6 +1978,11 @@ function App() {
           <div className="module-icon" style={{ background: 'linear-gradient(135deg, #9333EA 0%, #A855F7 100%)' }}>✏️</div>
           <div className="module-name">比赛录入</div>
           <div className="module-desc">录入新记录</div>
+        </div>
+        <div className="module-card" onClick={() => setPage('comp-manager')}>
+          <div className="module-icon" style={{ background: 'linear-gradient(135deg, #EC4899 0%, #F472B6 100%)' }}>🏟️</div>
+          <div className="module-name">比赛管理</div>
+          <div className="module-desc">编辑/删除比赛</div>
         </div>
       </div>
     </div>
@@ -1887,6 +2022,7 @@ function App() {
       case 'video': return '比赛视频'
       case 'compare': return '对比分析'
       case 'entry': return '比赛录入'
+      case 'comp-manager': return '比赛管理'
       default: return ''
     }
   }
@@ -1926,13 +2062,14 @@ function App() {
             {page === 'record-detail' ? renderRecordDetailPage() :
              page === 'video' ? renderVideoPage() :
              page === 'entry' ? renderEntryPage() :
-             page === 'compare' ? (
-               <div className="swimmer-page-bg">
-                 <div className="container" style={{ paddingTop: 16 }}>
-                   {renderComparePage()}
-                 </div>
-               </div>
-             ) : null}
+              page === 'compare' ? (
+                <div className="swimmer-page-bg">
+                  <div className="container" style={{ paddingTop: 16 }}>
+                    {renderComparePage()}
+                  </div>
+                </div>
+              ) :
+              page === 'comp-manager' ? renderCompManagerPage() : null}
           </main>
           <UploadStatusBar />
           {renderEditRecordModal()}
@@ -1987,6 +2124,7 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
   const [totalTime, setTotalTime] = useState('')
   const [raceYear, setRaceYear] = useState(new Date().getFullYear().toString())
   const [raceMonth, setRaceMonth] = useState((new Date().getMonth() + 1).toString().padStart(2, '0'))
+  const [raceDay, setRaceDay] = useState((new Date().getDate()).toString().padStart(2, '0'))
   const [saving, setSaving] = useState(false)
   const [videos, setVideos] = useState<any[]>([])
   const [linkedVideoId, setLinkedVideoId] = useState('')
@@ -1995,6 +2133,7 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
   const [showNewComp, setShowNewComp] = useState(false)
   const [newComp, setNewComp] = useState({ name: '', date: '', location: '' })
   const [creatingComp, setCreatingComp] = useState(false)
+
   const [recognizing, setRecognizing] = useState(false)
   const [recognizeError, setRecognizeError] = useState('')
   const [recognizePreview, setRecognizePreview] = useState<string | null>(null)
@@ -2050,7 +2189,7 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
         const data = await res.json()
         if (data.data) {
           const d = data.data
-          let comps = []
+          let comps: any[] = []
           if (Array.isArray(d)) { comps = d }
           else if (d.competitions && Array.isArray(d.competitions)) { comps = d.competitions }
           else if (d.name) { comps = [d] }
@@ -2219,7 +2358,7 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
           race_distance: raceDistance,
           stroke_type: strokeType,
           competition_id: compId || null,
-          race_date: `${raceYear}-${raceMonth}`,
+          race_date: `${raceYear}-${raceMonth}-${raceDay}`,
           metrics,
           linked_video_id: linkedVideoId || null,
         }),
@@ -2246,7 +2385,7 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
           race_distance: raceDistance,
           stroke_type: strokeType,
           competition_id: duplicateCheck.compId || null,
-          race_date: `${raceYear}-${raceMonth}`,
+          race_date: `${raceYear}-${raceMonth}-${raceDay}`,
           metrics: duplicateCheck.metrics,
         }),
       })
@@ -2364,6 +2503,9 @@ const ManualEntryCard: React.FC<{ swimmerName?: string; onSaved: () => void }> =
             </select>
             <select style={{ ...S, flex: 1 }} value={raceMonth} onChange={e => setRaceMonth(e.target.value)}>
               {Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0')).map(m => <option key={m} value={m}>{parseInt(m)}月</option>)}
+            </select>
+            <select style={{ ...S, flex: 1 }} value={raceDay} onChange={e => setRaceDay(e.target.value)}>
+              {Array.from({ length: 31 }, (_, i) => (i + 1).toString().padStart(2, '0')).map(d => <option key={d} value={d}>{parseInt(d)}日</option>)}
             </select>
           </div>
         </div>

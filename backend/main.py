@@ -187,6 +187,20 @@ async def init_upload(request: Request):
     }
 
 
+@app.get("/api/upload/status/{upload_id}")
+def upload_status(upload_id: str):
+    if upload_id not in upload_sessions:
+        raise HTTPException(status_code=404, detail="上传会话不存在")
+    session = upload_sessions[upload_id]
+    return {
+        "upload_id": upload_id,
+        "chunks_received": sorted(list(session["chunks_received"])),
+        "total_chunks": session["total_chunks"],
+        "file_size": session["file_size"],
+        "filename": session["filename"],
+    }
+
+
 @app.post("/api/upload/probe")
 async def upload_probe(request: Request):
     body = await request.body()
@@ -789,6 +803,36 @@ def delete_competition(comp_id: str):
         db.close()
 
 
+@app.put("/api/competitions/{comp_id}")
+async def update_competition(comp_id: str, request: Request):
+    body = await request.json()
+    db = SessionLocal()
+    try:
+        comp = db.query(Competition).filter(Competition.id == comp_id).first()
+        if not comp:
+            raise HTTPException(status_code=404, detail="比赛不存在")
+        old_name = comp.name
+        if "name" in body:
+            comp.name = body["name"]
+        if "date" in body:
+            comp.date = body["date"]
+        if "location" in body:
+            comp.location = body["location"]
+        new_name = comp.name
+        if old_name != new_name:
+            records = db.query(AnalysisRecord).filter(AnalysisRecord.race_name == old_name).all()
+            for r in records:
+                r.race_name = new_name
+                if comp.date:
+                    r.race_date = comp.date
+                if comp.location:
+                    r.race_location = comp.location
+        db.commit()
+        return {"status": "ok", "updated_records": len(records) if old_name != new_name else 0}
+    finally:
+        db.close()
+
+
 @app.post("/api/check_duplicate_record")
 async def check_duplicate_record(request: Request):
     body = await request.json()
@@ -1222,37 +1266,64 @@ async def detect_start_signal(video_id: str):
         envelope = np.sqrt(np.convolve(audio ** 2, np.ones(window) / window, mode='same'))
 
         global_p95 = np.percentile(envelope, 95)
-        threshold = global_p95 * 0.5
+        threshold = global_p95 * 0.3
 
-        search_start = int(sr * 0.5)
-        search_end = min(len(envelope), int(sr * 10))
+        search_start = int(sr * 0.3)
+        search_end = min(len(envelope), int(sr * 15))
 
-        first_above = None
-        for i in range(search_start, search_end):
+        candidates = []
+        i = search_start
+        while i < search_end:
             if envelope[i] > threshold:
                 local_max = 0
-                check_end = min(i + int(sr * 0.1), search_end)
+                local_max_idx = i
+                check_end = min(i + int(sr * 0.15), search_end)
                 for j in range(i, check_end):
                     if envelope[j] > local_max:
                         local_max = envelope[j]
-                if local_max > global_p95 * 0.8:
-                    first_above = i
-                    break
+                        local_max_idx = j
+                if local_max > global_p95 * 0.4:
+                    onset_idx = i
+                    pre_window = int(sr * 0.05)
+                    onset_threshold = envelope[max(0, i - pre_window)] * 2
+                    for k in range(i, max(i - pre_window, 0), -1):
+                        if envelope[k] < onset_threshold:
+                            onset_idx = k
+                            break
+                    pre_start = max(0, onset_idx - int(sr * 0.3))
+                    pre_seg = envelope[pre_start:onset_idx]
+                    pre_mean = pre_seg.mean()
+                    pre_min = pre_seg.min()
+                    contrast = local_max / (pre_mean + 1e-6)
+                    above_half = np.where(envelope[local_max_idx:min(local_max_idx + int(sr * 0.3), len(envelope))] > local_max * 0.5)[0]
+                    duration_ms = len(above_half) / sr * 1000 if len(above_half) > 0 else 500
+                    rise_start = local_max_idx
+                    for k in range(local_max_idx, max(local_max_idx - int(sr * 0.1), 0), -1):
+                        if envelope[k] < local_max * 0.1:
+                            rise_start = k
+                            break
+                    rise_ms = (local_max_idx - rise_start) / sr * 1000
+                    if rise_ms < 5:
+                        rise_ms = 5
+                    dur_score = max(0, 1 - (duration_ms - 10) / 90)
+                    rise_score = max(0, 1 - (rise_ms - 10) / 40)
+                    impulse_factor = 1 + dur_score * 0.4 + rise_score * 0.4
+                    quietness = 1.0 / (pre_min + 0.002)
+                    t_sec = onset_idx / sr
+                    time_factor = 1 + max(0, 1 - t_sec / 8) * 0.5
+                    score = np.log1p(contrast) * np.log1p(contrast) * quietness * impulse_factor * time_factor
+                    candidates.append((onset_idx, local_max_idx, local_max, contrast, duration_ms, rise_ms, t_sec, pre_min, quietness, score))
+                i = check_end
+                continue
+            i += 1
 
-        if first_above is None:
+        if not candidates:
             return None
 
-        onset_idx = first_above
-        pre_window = int(sr * 0.05)
-        onset_threshold = envelope[max(0, first_above - pre_window)] * 2
-        for i in range(first_above, max(first_above - pre_window, 0), -1):
-            if envelope[i] < onset_threshold:
-                onset_idx = i
-                break
-
-        peak_start = first_above
-        peak_end = min(first_above + int(sr * 0.05), len(envelope))
-        peak_idx = np.argmax(envelope[peak_start:peak_end]) + peak_start
+        candidates.sort(key=lambda x: -x[9])
+        best = candidates[0]
+        onset_idx = best[0]
+        peak_idx = best[1]
 
         onset_time = onset_idx / sr
         peak_time = peak_idx / sr
@@ -1589,6 +1660,122 @@ async def static_cache_middleware(request: Request, call_next):
     elif path == "/" or path == "/index.html":
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.post("/api/compare_timeline")
+async def compare_timeline(request: Request):
+    body = await request.json()
+    record_ids = body.get("record_ids", [])
+    if len(record_ids) < 2:
+        raise HTTPException(status_code=400, detail="至少选择2条记录")
+    db = SessionLocal()
+    try:
+        records = []
+        for rid in record_ids:
+            r = db.query(AnalysisRecord).filter(AnalysisRecord.id == rid).first()
+            if not r:
+                raise HTTPException(status_code=404, detail=f"记录不存在: {rid}")
+            records.append({
+                "id": r.id, "swimmer_name": r.swimmer_name,
+                "pool_length": r.pool_length, "race_distance": r.race_distance,
+                "stroke_type": r.stroke_type,
+                "race_name": r.race_name, "race_date": r.race_date,
+                "race_location": r.race_location,
+                "analysis_result": json.loads(r.analysis_result) if r.analysis_result else {},
+            })
+        return {"records": records}
+    finally:
+        db.close()
+
+
+@app.post("/api/compare_evaluate")
+async def compare_evaluate(request: Request):
+    if not LLM_API_KEY:
+        raise HTTPException(status_code=500, detail="未配置LLM API密钥")
+    body = await request.json()
+    records = body.get("records", [])
+    if len(records) < 2:
+        raise HTTPException(status_code=400, detail="至少2条记录")
+    import httpx
+    swimmer_name = records[0].get("swimmer_name", "")
+    birth_date = None
+    db = SessionLocal()
+    try:
+        profile = db.query(SwimmerProfile).filter(SwimmerProfile.name == swimmer_name).first()
+        if profile and profile.birth_date:
+            birth_date = profile.birth_date
+    finally:
+        db.close()
+
+    record_desc = ""
+    for i, r in enumerate(records):
+        ar = r.get("analysis_result", {})
+        total = ar.get("比赛总用时", "未知")
+        date = r.get("race_date", "未知")
+        race = r.get("race_name", "未知")
+        dist = r.get("race_distance", "未知")
+        stroke = r.get("stroke_type", "未知")
+        halves = []
+        for j in range(1, 9):
+            ht = ar.get(f"第{j}半程用时")
+            hs = ar.get(f"第{j}半程划水次数")
+            hb = ar.get(f"第{j}半程换气次数")
+            hk = ar.get(f"第{j}半程打腿次数")
+            if ht is not None:
+                parts = [f"第{j}半程{ht:.2f}秒"]
+                if hs is not None: parts.append(f"划水{int(hs)}次")
+                if hb is not None: parts.append(f"换气{int(hb)}次")
+                if hk is not None: parts.append(f"打腿{int(hk)}次")
+                halves.append("/".join(parts))
+        total_str = f"{total:.2f}秒" if isinstance(total, (int, float)) else str(total)
+        age_info = ""
+        if birth_date and date and len(date) >= 7:
+            try:
+                by, bm = int(birth_date[:4]), int(birth_date[5:7])
+                ry, rm = int(date[:4]), int(date[5:7])
+                age_months = (ry - by) * 12 + (rm - bm)
+                age_info = f"（当时约{age_months/12:.1f}岁）"
+            except: pass
+        record_desc += f"记录{i+1}: {date}{age_info} {race} {dist}米{stroke} 总成绩{total_str}"
+        if halves: record_desc += f" ({'; '.join(halves)})"
+        record_desc += "\n"
+
+    age_context = ""
+    if birth_date:
+        age_context = f"\n运动员出生日期：{birth_date}"
+        try:
+            age = (datetime.now() - datetime.strptime(birth_date, "%Y-%m-%d")).days / 365.25
+            age_context += f"，当前年龄约{age:.1f}岁"
+        except: pass
+
+    prompt = f"""你是一位资深青少年游泳教练和运动科学专家，请根据以下运动员在不同时间的比赛成绩记录，进行专业、深入的分析和评价。
+
+要求：
+1. 结合运动员年龄和身体发育阶段分析（青春期前/青春期/青春期后，不同阶段训练重点不同）
+2. 分析成绩变化趋势（进步/退步/持平），计算月均进步幅度
+3. 分析技术指标变化趋势（划水次数减少=效率提升，打腿次数变化等）
+4. 前后半程配速分析（是否前快后慢，配速策略是否合理）
+5. 针对当前年龄和水平，给出具体、可执行的训练建议（技术/体能/策略）
+6. 语言专业但易懂，300字以内
+
+运动员：{swimmer_name}{age_context}
+
+成绩记录：
+{record_desc}"""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{LLM_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+                json={"model": LLM_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.7, "max_tokens": 800},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                evaluation = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                return {"evaluation": evaluation}
+            return {"evaluation": "AI评价暂时不可用"}
+    except Exception as e:
+        return {"evaluation": f"AI评价请求失败: {str(e)}"}
 
 
 if os.path.exists(FRONTEND_DIST):

@@ -148,6 +148,7 @@ export const VideoManager: React.FC = () => {
     const totalChunks = Math.ceil(file.size / CHUNK)
     const startTime = Date.now()
     let uploadMode: 'formdata' | 'base64' | 'raw' = 'formdata'
+    let uploadId = ''
 
     const updateUI = () => {
       const elapsed = (Date.now() - startTime) / 1000
@@ -162,14 +163,14 @@ export const VideoManager: React.FC = () => {
 
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-    const uploadChunkWithRetry = async (uploadId: string, chunkIndex: number, blob: Blob, retries = 3): Promise<boolean> => {
+    const uploadChunkWithRetry = async (uid: string, chunkIndex: number, blob: Blob, retries = 3): Promise<boolean> => {
       for (let attempt = 0; attempt < retries; attempt++) {
         if (task.abortController?.signal.aborted) return false
         try {
           if (uploadMode === 'formdata') {
             const fd = new FormData()
             fd.append('chunk', blob, `chunk_${chunkIndex}`)
-            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uploadId)}&chunk_index=${chunkIndex}`, {
+            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uid)}&chunk_index=${chunkIndex}`, {
               method: 'POST',
               body: fd,
               signal: task.abortController?.signal,
@@ -180,7 +181,7 @@ export const VideoManager: React.FC = () => {
               uploadMode = 'base64'
               task.speed = `切换Base64模式...`
               updateUI()
-              return uploadChunkWithRetry(uploadId, chunkIndex, blob, retries - attempt)
+              return uploadChunkWithRetry(uid, chunkIndex, blob, retries - attempt)
             }
           } else if (uploadMode === 'base64') {
             const arrayBuf = await blob.arrayBuffer()
@@ -188,7 +189,7 @@ export const VideoManager: React.FC = () => {
             let binary = ''
             for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
             const b64 = btoa(binary)
-            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uploadId)}&chunk_index=${chunkIndex}`, {
+            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uid)}&chunk_index=${chunkIndex}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ data: b64 }),
@@ -200,10 +201,10 @@ export const VideoManager: React.FC = () => {
               uploadMode = 'raw'
               task.speed = `切换原始模式...`
               updateUI()
-              return uploadChunkWithRetry(uploadId, chunkIndex, blob, retries - attempt)
+              return uploadChunkWithRetry(uid, chunkIndex, blob, retries - attempt)
             }
           } else {
-            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uploadId)}&chunk_index=${chunkIndex}`, {
+            const res = await fetch(`${API_BASE}/upload/chunk?upload_id=${encodeURIComponent(uid)}&chunk_index=${chunkIndex}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/octet-stream' },
               body: blob,
@@ -223,7 +224,7 @@ export const VideoManager: React.FC = () => {
             uploadMode = 'base64'
             task.speed = `FormData失败，切换Base64...`
             updateUI()
-            return uploadChunkWithRetry(uploadId, chunkIndex, blob, retries - attempt)
+            return uploadChunkWithRetry(uid, chunkIndex, blob, retries - attempt)
           }
           if (attempt < retries - 1) {
             task.speed = `分片${chunkIndex + 1}网络错误，重试${attempt + 1}/${retries}...`
@@ -258,10 +259,30 @@ export const VideoManager: React.FC = () => {
         signal: task.abortController?.signal,
       })
       if (!initRes.ok) { task.speed = '初始化失败'; task.status = 'error'; updateUI(); return }
-      const { upload_id } = await initRes.json()
+      const initData = await initRes.json()
+      uploadId = initData.upload_id
+
+      let skipChunks = new Set<number>()
+      try {
+        const statusRes = await fetch(`${API_BASE}/upload/status/${uploadId}`, { signal: task.abortController?.signal })
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          skipChunks = new Set(statusData.chunks_received)
+          if (skipChunks.size > 0) {
+            task.speed = `断点续传，跳过${skipChunks.size}个已传分片...`
+            let loadedBytes = 0
+            skipChunks.forEach((ci: number) => { loadedBytes += Math.min((ci + 1) * CHUNK, file.size) - ci * CHUNK })
+            task.loaded = loadedBytes
+            task.progress = Math.round((loadedBytes / file.size) * 100)
+            updateUI()
+          }
+        }
+      } catch {}
 
       for (let i = 0; i < totalChunks; i++) {
         if (task.abortController?.signal.aborted) return
+        if (skipChunks.has(i)) continue
+
         const start = i * CHUNK
         const end = Math.min(start + CHUNK, file.size)
         const blob = file.slice(start, end)
@@ -269,10 +290,10 @@ export const VideoManager: React.FC = () => {
         task.speed = `分片 ${i + 1}/${totalChunks} [${uploadMode}] (${(blob.size / 1024).toFixed(0)}KB)`
         updateUI()
 
-        const ok = await uploadChunkWithRetry(upload_id, i, blob)
+        const ok = await uploadChunkWithRetry(uploadId, i, blob)
         if (!ok) {
           task.status = 'error'
-          task.speed = `分片${i + 1}上传失败(模式:${uploadMode})`
+          task.speed = `分片${i + 1}上传失败(模式:${uploadMode})，可重新上传续传`
           updateUI()
           return
         }
@@ -289,13 +310,13 @@ export const VideoManager: React.FC = () => {
       const compRes = await fetch(`${API_BASE}/upload/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id }),
+        body: JSON.stringify({ upload_id: uploadId }),
         signal: task.abortController?.signal,
       })
       if (!compRes.ok) { task.speed = '合并失败'; task.status = 'error'; updateUI(); return }
       const compData = await compRes.json()
 
-      task.videoId = compData.video_id || upload_id
+      task.videoId = compData.video_id || uploadId
       task.progress = 100
       task.status = 'done'
       task.speed = '上传完成'
@@ -308,7 +329,7 @@ export const VideoManager: React.FC = () => {
         task.speed = '已取消'
       } else {
         task.status = 'error'
-        task.speed = err.message || '上传失败'
+        task.speed = err.message || '上传失败，可重新上传续传'
       }
       updateUI()
     }

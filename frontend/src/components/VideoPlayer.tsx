@@ -91,6 +91,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
+  const dragTimeRef = useRef<number | null>(null)
+
   useEffect(() => {
     if (!draggingProgress) return
     const handleMove = (e: MouseEvent) => {
@@ -98,15 +100,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const rect = progressRef.current.getBoundingClientRect()
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
       const time = ratio * duration
+      dragTimeRef.current = time
       setDragTime(time)
     }
     const handleUp = () => {
-      if (dragTime !== null && videoRef.current) {
-        videoRef.current.currentTime = dragTime
-        setCurrentTime(dragTime)
+      if (dragTimeRef.current !== null && videoRef.current) {
+        videoRef.current.currentTime = dragTimeRef.current
+        setCurrentTime(dragTimeRef.current)
       }
       setDraggingProgress(false)
       setDragTime(null)
+      dragTimeRef.current = null
     }
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
@@ -114,7 +118,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
     }
-  }, [draggingProgress, duration, dragTime])
+  }, [draggingProgress, duration])
 
   const handleSpeedChange = (newSpeed: number) => {
     setSpeed(newSpeed)

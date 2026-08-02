@@ -18,7 +18,7 @@ interface Annotation {
 interface VideoAnnotationOverlayProps {
   videoId: string
   athleteName?: string
-  videoRef: React.RefObject<HTMLVideoElement>
+  videoRef: React.RefObject<HTMLVideoElement | null>
   editMode: boolean
 }
 
@@ -153,6 +153,7 @@ export const VideoAnnotationOverlay: React.FC<VideoAnnotationOverlayProps> = ({
                   video_id: videoId,
                   annotation_type: 'tracking_mark',
                   position_x: 0.5, position_y: 0.5,
+                  width: 0.01, height: 0.01,
                   video_time: videoRef.current?.currentTime || 0,
                 }),
               })

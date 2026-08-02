@@ -33,7 +33,7 @@ interface EntryGroup {
   name: string
   required: boolean
   collapsible: boolean
-  items: { label: string; key: string; unit?: string; placeholder?: string }[]
+  items: { label: string; key: string; unit?: string; placeholder?: string; hideOn50m?: boolean }[]
 }
 
 const ENTRY_GROUPS: EntryGroup[] = [

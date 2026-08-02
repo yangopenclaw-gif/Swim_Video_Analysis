@@ -120,8 +120,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ open, onClose, onUploa
         selectedCompetition.pool_length,
         selectedCompetition.race_distance,
         1,
-        selectedAthlete.id,
-        selectedCompetition.id,
+
       )
     } catch (e: any) {
       setError(e.message || '上传失败')
