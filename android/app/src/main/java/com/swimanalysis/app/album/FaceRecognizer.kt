@@ -3,24 +3,18 @@ package com.swimanalysis.app.album
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Matrix
 import android.media.ExifInterface
+import android.media.FaceDetector
 import android.net.Uri
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.Face
-import com.google.mlkit.vision.face.FaceContour
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetectorOptions
-import com.google.mlkit.vision.face.FaceLandmark
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
 import kotlin.math.sqrt
 
 data class FaceFeature(
     val embedding: FloatArray,
-    val bounds: android.graphics.Rect
+    val confidence: Float
 ) {
     fun cosineSimilarity(other: FaceFeature): Float {
         var dot = 0f
@@ -38,79 +32,63 @@ data class FaceFeature(
 
 class FaceRecognizer {
 
-    private val detector = FaceDetection.getClient(
-        FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-            .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.15f)
-            .build()
-    )
-
-    suspend fun detectFaces(bitmap: Bitmap): List<Face> = suspendCancellableCoroutine { cont ->
-        val image = InputImage.fromBitmap(bitmap, 0)
-        detector.process(image)
-            .addOnSuccessListener { faces -> cont.resume(faces) }
-            .addOnFailureListener { cont.resume(emptyList()) }
-    }
-
     suspend fun extractFeature(context: Context, uri: Uri): FaceFeature? = withContext(Dispatchers.IO) {
         try {
             val bitmap = loadBitmap(context, uri) ?: return@withContext null
-            val faces = detectFaces(bitmap)
-            if (faces.isEmpty()) return@withContext null
+            val rgb565 = bitmap.copy(Bitmap.Config.RGB_565, false)
+            if (rgb565 == null) {
+                bitmap.recycle()
+                return@withContext null
+            }
 
-            val face = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }!!
-            val embedding = computeEmbedding(face)
-            FaceFeature(embedding, face.boundingBox)
+            val maxFaces = 5
+            val faces = arrayOfNulls<FaceDetector.Face>(maxFaces)
+            val detector = FaceDetector(rgb565.width, rgb565.height, maxFaces)
+            val count = detector.findFaces(rgb565, faces)
+
+            if (count == 0) {
+                rgb565.recycle()
+                bitmap.recycle()
+                return@withContext null
+            }
+
+            val face = faces.filterNotNull().maxByOrNull { it.confidence() }!!
+            val embedding = computeEmbedding(face, rgb565.width, rgb565.height)
+
+            rgb565.recycle()
+            bitmap.recycle()
+
+            FaceFeature(embedding, face.confidence())
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun computeEmbedding(face: Face): FloatArray {
+    private fun computeEmbedding(face: FaceDetector.Face, imgWidth: Int, imgHeight: Int): FloatArray {
         val features = mutableListOf<Float>()
 
-        val leftEye = face.getLandmark(FaceLandmark.LEFT_EYE)
-        features.add(leftEye?.position?.x ?: 0f)
-        features.add(leftEye?.position?.y ?: 0f)
+        val eyeDist = face.eyesDistance()
+        features.add(eyeDist / imgWidth)
 
-        val rightEye = face.getLandmark(FaceLandmark.RIGHT_EYE)
-        features.add(rightEye?.position?.x ?: 0f)
-        features.add(rightEye?.position?.y ?: 0f)
+        val midPoint = android.graphics.PointF()
+        face.getMidPoint(midPoint)
+        features.add(midPoint.x / imgWidth)
+        features.add(midPoint.y / imgHeight)
 
-        val nose = face.getLandmark(FaceLandmark.NOSE_BASE)
-        features.add(nose?.position?.x ?: 0f)
-        features.add(nose?.position?.y ?: 0f)
+        features.add(face.confidence())
 
-        val mouthLeft = face.getLandmark(FaceLandmark.MOUTH_LEFT)
-        features.add(mouthLeft?.position?.x ?: 0f)
-        features.add(mouthLeft?.position?.y ?: 0f)
+        features.add(eyeDist / imgHeight)
+        features.add(midPoint.x / imgHeight)
+        features.add(midPoint.y / imgWidth)
 
-        val mouthRight = face.getLandmark(FaceLandmark.MOUTH_RIGHT)
-        features.add(mouthRight?.position?.x ?: 0f)
-        features.add(mouthRight?.position?.y ?: 0f)
+        val eyeLeftX = midPoint.x - eyeDist / 2
+        val eyeRightX = midPoint.x + eyeDist / 2
+        features.add(eyeLeftX / imgWidth)
+        features.add(eyeRightX / imgWidth)
+        features.add(midPoint.y / imgHeight)
 
-        val leftEar = face.getLandmark(FaceLandmark.LEFT_EAR)
-        features.add(leftEar?.position?.x ?: 0f)
-        features.add(leftEar?.position?.y ?: 0f)
-
-        val rightEar = face.getLandmark(FaceLandmark.RIGHT_EAR)
-        features.add(rightEar?.position?.x ?: 0f)
-        features.add(rightEar?.position?.y ?: 0f)
-
-        features.add(face.headEulerAngleX)
-        features.add(face.headEulerAngleY)
-        features.add(face.headEulerAngleZ)
-        features.add(face.smilingProbability ?: 0f)
-        features.add(face.leftEyeOpenProbability ?: 0f)
-        features.add(face.rightEyeOpenProbability ?: 0f)
-
-        val contour = face.getContour(FaceContour.FACE)
-        contour?.points?.forEach { p ->
-            features.add(p.x); features.add(p.y)
-        }
+        features.add(eyeDist * eyeDist / (imgWidth * imgHeight))
+        features.add(midPoint.x * midPoint.y / (imgWidth * imgHeight))
 
         return normalize(features.toFloatArray())
     }
@@ -156,7 +134,7 @@ class FaceRecognizer {
         }
     }
 
-    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.82f): Boolean {
+    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.92f): Boolean {
         return feature1.cosineSimilarity(feature2) > threshold
     }
 }
