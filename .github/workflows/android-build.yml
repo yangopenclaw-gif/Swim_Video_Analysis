@@ -13,6 +13,9 @@ jobs:
     name: Build Debug APK
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     defaults:
       run:
         working-directory: android
@@ -38,6 +41,13 @@ jobs:
       - name: Build Release APK
         run: gradle assembleRelease --no-daemon --stacktrace
 
+      - name: Extract Version
+        id: version
+        run: |
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*versionName = "//;s/".*//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -51,3 +61,23 @@ jobs:
           name: swim-analysis-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: 泳娃分析 v${{ steps.version.outputs.version }}
+          body: |
+            ## 泳娃分析 v${{ steps.version.outputs.version }}
+
+            ### 下载安装
+            - 下载下方 `app-debug.apk` 直接安装
+            - 或下载 `app-release.apk`（更小体积）
+
+            ### 更新方式
+            已安装旧版本的用户可在应用内「设置 → 检查更新」自动升级
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release.apk
+          draft: false
+          prerelease: false
