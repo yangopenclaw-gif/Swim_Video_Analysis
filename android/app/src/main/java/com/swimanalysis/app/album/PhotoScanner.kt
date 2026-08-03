@@ -179,8 +179,8 @@ class PhotoScanner(
         if (latitude == 0.0 || longitude == 0.0) {
             try {
                 val exif = ExifInterface(path)
-                val latLng = exif.latLong
-                if (latLng != null) {
+                val latLng = DoubleArray(2)
+                if (exif.getLatLong(latLng)) {
                     latitude = latLng[0]
                     longitude = latLng[1]
                 }
