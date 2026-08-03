@@ -17,7 +17,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Context
@@ -56,7 +56,7 @@ class UpdateViewModel @Inject constructor(
 fun UpdateDialog(
     updateInfo: UpdateInfo,
     onDismiss: () -> Unit,
-    viewModel: UpdateViewModel = viewModel()
+    viewModel: UpdateViewModel = hiltViewModel()
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val downloadState by viewModel.downloadState.collectAsState()
