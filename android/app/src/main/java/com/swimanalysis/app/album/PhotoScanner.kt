@@ -179,10 +179,10 @@ class PhotoScanner(
         if (latitude == 0.0 || longitude == 0.0) {
             try {
                 val exif = ExifInterface(path)
-                val latLng = DoubleArray(2)
+                val latLng = FloatArray(2)
                 if (exif.getLatLong(latLng)) {
-                    latitude = latLng[0]
-                    longitude = latLng[1]
+                    latitude = latLng[0].toDouble()
+                    longitude = latLng[1].toDouble()
                 }
             } catch (_: Exception) {}
         }
