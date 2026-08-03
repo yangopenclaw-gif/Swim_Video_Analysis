@@ -107,7 +107,7 @@ dependencies {
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
-    implementation("com.google.mlkit:face-detection:16.8.1")
+    implementation("com.google.mlkit:face-detection:16.6.0")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     testImplementation("junit:junit:4.13.2")
