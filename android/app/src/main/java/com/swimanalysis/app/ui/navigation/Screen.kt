@@ -5,6 +5,7 @@ sealed class Screen(val route: String, val title: String) {
     data object Records : Screen("records", "记录")
     data object Upload : Screen("upload", "上传")
     data object Videos : Screen("videos", "视频")
+    data object Album : Screen("album", "相册")
     data object Profile : Screen("profile", "我的")
 
     data object RecordDetail : Screen("record/{recordId}", "记录详情")

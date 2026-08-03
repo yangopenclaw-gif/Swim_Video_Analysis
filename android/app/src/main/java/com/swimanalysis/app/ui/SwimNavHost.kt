@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.outlined.Analytics
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -37,6 +38,7 @@ import com.swimanalysis.app.ui.screen.VideoAnnotateScreenFull
 import com.swimanalysis.app.ui.screen.VideoPlayerScreenFull
 import com.swimanalysis.app.ui.screen.VideosScreen
 import com.swimanalysis.app.ui.screen.ProfileScreen
+import com.swimanalysis.app.album.AlbumScreen
 
 private data class BottomItem(
     val screen: Screen,
@@ -49,6 +51,7 @@ private val bottomItems = listOf(
     BottomItem(Screen.Records, Icons.Outlined.Analytics, "记录"),
     BottomItem(Screen.Upload, Icons.Filled.Upload, "上传"),
     BottomItem(Screen.Videos, Icons.Filled.PlayArrow, "视频"),
+    BottomItem(Screen.Album, Icons.Outlined.PhotoLibrary, "相册"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
 )
 
@@ -96,6 +99,7 @@ fun SwimNavHost() {
             composable(Screen.Records.route) { RecordsScreen(navController) }
             composable(Screen.Upload.route) { UploadScreenFull(navController) }
             composable(Screen.Videos.route) { VideosScreen(navController) }
+            composable(Screen.Album.route) { AlbumScreen(navController) }
             composable(Screen.Profile.route) { ProfileScreen(navController) }
 
             composable(Screen.RecordDetail.route) { backStack ->

@@ -14,8 +14,8 @@ android {
         applicationId = "com.swimanalysis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.1.2"
+        versionCode = 5
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -106,6 +106,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    implementation("com.google.mlkit:face-detection:16.8.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
