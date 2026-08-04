@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.PointF
 import android.media.ExifInterface
 import android.media.FaceDetector
 import android.net.Uri
@@ -32,12 +33,20 @@ data class FaceFeature(
 
 class FaceRecognizer {
 
+    companion object {
+        private const val FACE_SIZE = 48
+        private const val MAX_IMAGE_DIM = 640
+    }
+
     suspend fun extractFeature(context: Context, uri: Uri): FaceFeature? = withContext(Dispatchers.IO) {
         try {
             val bitmap = loadBitmap(context, uri) ?: return@withContext null
-            val rgb565 = bitmap.copy(Bitmap.Config.RGB_565, false)
+            val scaled = scaleDownIfNeeded(bitmap)
+            if (scaled !== bitmap) bitmap.recycle()
+
+            val rgb565 = scaled.copy(Bitmap.Config.RGB_565, false)
             if (rgb565 == null) {
-                bitmap.recycle()
+                scaled.recycle()
                 return@withContext null
             }
 
@@ -48,15 +57,24 @@ class FaceRecognizer {
 
             if (count == 0) {
                 rgb565.recycle()
-                bitmap.recycle()
+                scaled.recycle()
                 return@withContext null
             }
 
             val face = faces.filterNotNull().maxByOrNull { it.confidence() }!!
-            val embedding = computeEmbedding(face, rgb565.width, rgb565.height)
+            val midPoint = PointF()
+            face.getMidPoint(midPoint)
+            val eyeDist = face.eyesDistance()
+
+            val faceBitmap = alignAndCropFace(scaled, midPoint, eyeDist)
 
             rgb565.recycle()
-            bitmap.recycle()
+            scaled.recycle()
+
+            if (faceBitmap == null) return@withContext null
+
+            val embedding = extractFaceEmbedding(faceBitmap)
+            faceBitmap.recycle()
 
             FaceFeature(embedding, face.confidence())
         } catch (e: Exception) {
@@ -64,33 +82,104 @@ class FaceRecognizer {
         }
     }
 
-    private fun computeEmbedding(face: FaceDetector.Face, imgWidth: Int, imgHeight: Int): FloatArray {
-        val features = mutableListOf<Float>()
+    private fun scaleDownIfNeeded(bitmap: Bitmap): Bitmap {
+        val maxDim = maxOf(bitmap.width, bitmap.height)
+        if (maxDim <= MAX_IMAGE_DIM) return bitmap
+        val scale = MAX_IMAGE_DIM.toFloat() / maxDim
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt(),
+            (bitmap.height * scale).toInt(),
+            true
+        )
+    }
 
-        val eyeDist = face.eyesDistance()
-        features.add(eyeDist / imgWidth)
+    private fun alignAndCropFace(bitmap: Bitmap, midPoint: PointF, eyeDist: Float): Bitmap? {
+        if (eyeDist < 10f) return null
 
-        val midPoint = android.graphics.PointF()
-        face.getMidPoint(midPoint)
-        features.add(midPoint.x / imgWidth)
-        features.add(midPoint.y / imgHeight)
+        val faceWidth = eyeDist * 2.2f
+        val faceHeight = eyeDist * 2.8f
 
-        features.add(face.confidence())
+        val srcLeft = (midPoint.x - faceWidth / 2).coerceAtLeast(0f).toInt()
+        val srcTop = (midPoint.y - faceHeight * 0.35f).coerceAtLeast(0f).toInt()
+        val srcRight = (midPoint.x + faceWidth / 2).coerceAtMost(bitmap.width.toFloat()).toInt()
+        val srcBottom = (midPoint.y + faceHeight * 0.65f).coerceAtMost(bitmap.height.toFloat()).toInt()
 
-        features.add(eyeDist / imgHeight)
-        features.add(midPoint.x / imgHeight)
-        features.add(midPoint.y / imgWidth)
+        val w = srcRight - srcLeft
+        val h = srcBottom - srcTop
+        if (w < 20 || h < 20) return null
 
-        val eyeLeftX = midPoint.x - eyeDist / 2
-        val eyeRightX = midPoint.x + eyeDist / 2
-        features.add(eyeLeftX / imgWidth)
-        features.add(eyeRightX / imgWidth)
-        features.add(midPoint.y / imgHeight)
+        val cropped = Bitmap.createBitmap(bitmap, srcLeft, srcTop, w, h)
+        val resized = Bitmap.createScaledBitmap(cropped, FACE_SIZE, FACE_SIZE, true)
+        if (cropped !== resized) cropped.recycle()
+        return resized
+    }
 
-        features.add(eyeDist * eyeDist / (imgWidth * imgHeight))
-        features.add(midPoint.x * midPoint.y / (imgWidth * imgHeight))
+    private fun extractFaceEmbedding(faceBitmap: Bitmap): FloatArray {
+        val size = FACE_SIZE * FACE_SIZE
+        val pixels = IntArray(size)
+        faceBitmap.getPixels(pixels, 0, FACE_SIZE, 0, 0, FACE_SIZE, FACE_SIZE)
 
-        return normalize(features.toFloatArray())
+        val gray = FloatArray(size)
+        var mean = 0f
+        for (i in pixels.indices) {
+            val lum = grayValue(pixels[i])
+            gray[i] = lum
+            mean += lum
+        }
+        mean /= size
+
+        var std = 0f
+        for (i in gray.indices) {
+            gray[i] -= mean
+            std += gray[i] * gray[i]
+        }
+        std = sqrt(std / size)
+        if (std > 0.1f) {
+            for (i in gray.indices) {
+                gray[i] /= std
+            }
+        }
+
+        val lbp = computeLBP(pixels)
+
+        val embedding = FloatArray(size + lbp.size)
+        System.arraycopy(gray, 0, embedding, 0, size)
+        for (i in lbp.indices) {
+            embedding[size + i] = lbp[i] * 0.5f
+        }
+
+        return normalize(embedding)
+    }
+
+    private fun computeLBP(pixels: IntArray): FloatArray {
+        val w = FACE_SIZE
+        val h = FACE_SIZE
+        val lbp = FloatArray(w * h)
+
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val center = grayValue(pixels[y * w + x])
+                var code = 0
+                if (grayValue(pixels[(y - 1) * w + (x - 1)]) >= center) code = code or 1
+                if (grayValue(pixels[(y - 1) * w + x]) >= center) code = code or 2
+                if (grayValue(pixels[(y - 1) * w + (x + 1)]) >= center) code = code or 4
+                if (grayValue(pixels[y * w + (x + 1)]) >= center) code = code or 8
+                if (grayValue(pixels[(y + 1) * w + (x + 1)]) >= center) code = code or 16
+                if (grayValue(pixels[(y + 1) * w + x]) >= center) code = code or 32
+                if (grayValue(pixels[(y + 1) * w + (x - 1)]) >= center) code = code or 64
+                if (grayValue(pixels[y * w + (x - 1)]) >= center) code = code or 128
+                lbp[y * w + x] = code.toFloat() / 255f
+            }
+        }
+        return lbp
+    }
+
+    private fun grayValue(pixel: Int): Float {
+        val r = Color.red(pixel)
+        val g = Color.green(pixel)
+        val b = Color.blue(pixel)
+        return 0.299f * r + 0.587f * g + 0.114f * b
     }
 
     private fun normalize(arr: FloatArray): FloatArray {
@@ -112,7 +201,9 @@ class FaceRecognizer {
 
             val matrix = Matrix()
             matrix.postRotate(rotation.toFloat())
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) bitmap.recycle()
+            rotated
         } catch (e: Exception) {
             null
         }
@@ -134,7 +225,7 @@ class FaceRecognizer {
         }
     }
 
-    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.92f): Boolean {
+    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.55f): Boolean {
         return feature1.cosineSimilarity(feature2) > threshold
     }
 }

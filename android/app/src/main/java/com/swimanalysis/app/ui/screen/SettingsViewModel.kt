@@ -79,4 +79,8 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    fun clearUpdateInfo() {
+        _state.update { it.copy(updateInfo = null, updateError = null) }
+    }
 }

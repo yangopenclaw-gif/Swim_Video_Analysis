@@ -137,7 +137,7 @@ fun SettingsScreenFull(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("当前版本", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                        Text("v${BuildConfig.VERSION_NAME}")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
@@ -219,7 +219,7 @@ fun SettingsScreenFull(
         if (info.hasUpdate) {
             UpdateDialog(
                 updateInfo = info,
-                onDismiss = { }
+                onDismiss = { viewModel.clearUpdateInfo() }
             )
         }
     }
