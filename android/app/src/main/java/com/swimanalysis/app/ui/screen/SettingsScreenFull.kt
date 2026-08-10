@@ -201,14 +201,7 @@ fun SettingsScreenFull(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("版本", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(BuildConfig.VERSION_NAME)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("构建版本", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(BuildConfig.VERSION_CODE.toString())
+                        Text("v${BuildConfig.VERSION_NAME}")
                     }
                 }
             }

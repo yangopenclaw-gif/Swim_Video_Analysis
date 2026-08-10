@@ -55,18 +55,15 @@ class FaceRecognizer {
             val detector = FaceDetector(rgb565.width, rgb565.height, maxFaces)
             val count = detector.findFaces(rgb565, faces)
 
-            if (count == 0) {
-                rgb565.recycle()
-                scaled.recycle()
-                return@withContext null
+            val faceBitmap = if (count > 0) {
+                val face = faces.filterNotNull().maxByOrNull { it.confidence() }!!
+                val midPoint = PointF()
+                face.getMidPoint(midPoint)
+                val eyeDist = face.eyesDistance()
+                alignAndCropFace(scaled, midPoint, eyeDist)
+            } else {
+                centerCrop(scaled)
             }
-
-            val face = faces.filterNotNull().maxByOrNull { it.confidence() }!!
-            val midPoint = PointF()
-            face.getMidPoint(midPoint)
-            val eyeDist = face.eyesDistance()
-
-            val faceBitmap = alignAndCropFace(scaled, midPoint, eyeDist)
 
             rgb565.recycle()
             scaled.recycle()
@@ -76,7 +73,7 @@ class FaceRecognizer {
             val embedding = extractFaceEmbedding(faceBitmap)
             faceBitmap.recycle()
 
-            FaceFeature(embedding, face.confidence())
+            FaceFeature(embedding, if (count > 0) faces.filterNotNull().maxByOrNull { it.confidence() }!!.confidence() else 0.5f)
         } catch (e: Exception) {
             null
         }
@@ -115,41 +112,74 @@ class FaceRecognizer {
         return resized
     }
 
+    private fun centerCrop(bitmap: Bitmap): Bitmap? {
+        val w = bitmap.width
+        val h = bitmap.height
+        val size = minOf(w, h) * 60 / 100
+        if (size < 20) return null
+        val left = (w - size) / 2
+        val top = (h - size) / 2
+        val cropped = Bitmap.createBitmap(bitmap, left, top, size, size)
+        val resized = Bitmap.createScaledBitmap(cropped, FACE_SIZE, FACE_SIZE, true)
+        if (cropped !== resized) cropped.recycle()
+        return resized
+    }
+
     private fun extractFaceEmbedding(faceBitmap: Bitmap): FloatArray {
         val size = FACE_SIZE * FACE_SIZE
         val pixels = IntArray(size)
         faceBitmap.getPixels(pixels, 0, FACE_SIZE, 0, 0, FACE_SIZE, FACE_SIZE)
 
         val gray = FloatArray(size)
-        var mean = 0f
         for (i in pixels.indices) {
-            val lum = grayValue(pixels[i])
-            gray[i] = lum
-            mean += lum
+            gray[i] = grayValue(pixels[i])
         }
+
+        val equalized = histogramEqualize(gray)
+
+        var mean = 0f
+        for (v in equalized) mean += v
         mean /= size
 
         var std = 0f
-        for (i in gray.indices) {
-            gray[i] -= mean
-            std += gray[i] * gray[i]
+        for (i in equalized.indices) {
+            equalized[i] -= mean
+            std += equalized[i] * equalized[i]
         }
         std = sqrt(std / size)
         if (std > 0.1f) {
-            for (i in gray.indices) {
-                gray[i] /= std
+            for (i in equalized.indices) {
+                equalized[i] /= std
             }
         }
 
         val lbp = computeLBP(pixels)
 
         val embedding = FloatArray(size + lbp.size)
-        System.arraycopy(gray, 0, embedding, 0, size)
+        System.arraycopy(equalized, 0, embedding, 0, size)
         for (i in lbp.indices) {
             embedding[size + i] = lbp[i] * 0.5f
         }
 
         return normalize(embedding)
+    }
+
+    private fun histogramEqualize(gray: FloatArray): FloatArray {
+        val hist = IntArray(256)
+        for (v in gray) {
+            val bin = v.toInt().coerceIn(0, 255)
+            hist[bin]++
+        }
+        val cdf = IntArray(256)
+        cdf[0] = hist[0]
+        for (i in 1 until 256) cdf[i] = cdf[i - 1] + hist[i]
+        val cdfMin = cdf.first { it > 0 }
+        val total = gray.size
+        val lut = FloatArray(256)
+        for (i in 0 until 256) {
+            lut[i] = ((cdf[i] - cdfMin).toFloat() / (total - cdfMin) * 255f).coerceIn(0f, 255f)
+        }
+        return FloatArray(total) { i -> lut[gray[i].toInt().coerceIn(0, 255)] }
     }
 
     private fun computeLBP(pixels: IntArray): FloatArray {
@@ -225,7 +255,7 @@ class FaceRecognizer {
         }
     }
 
-    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.55f): Boolean {
+    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.5f): Boolean {
         return feature1.cosineSimilarity(feature2) > threshold
     }
 }

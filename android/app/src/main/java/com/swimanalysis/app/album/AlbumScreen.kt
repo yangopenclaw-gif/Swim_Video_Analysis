@@ -1,6 +1,9 @@
 package com.swimanalysis.app.album
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -68,6 +71,20 @@ fun AlbumScreen(
         }
     }
 
+    val storagePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.startScan()
+    }
+
+    val hasPermission = context.checkSelfPermission(storagePermission) == PackageManager.PERMISSION_GRANTED
+
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("个人相册") })
@@ -133,7 +150,10 @@ fun AlbumScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
-                onClick = { viewModel.startScan() },
+                onClick = {
+                    if (hasPermission) viewModel.startScan()
+                    else permissionLauncher.launch(storagePermission)
+                },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !state.isScanning
             ) {
