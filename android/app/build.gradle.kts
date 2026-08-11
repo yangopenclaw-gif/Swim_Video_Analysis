@@ -26,14 +26,9 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreB64 = System.getenv("SIGNING_KEYSTORE_B64")
-            if (!keystoreB64.isNullOrEmpty()) {
-                val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
-                    ?: "${rootProject.buildDir}/signing.keystore"
-                val keystoreFile = File(storePath)
-                keystoreFile.parentFile?.mkdirs()
-                keystoreFile.writeBytes(java.util.Base64.getDecoder().decode(keystoreB64))
-                storeFile = keystoreFile
+            val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
+            if (!storePath.isNullOrEmpty() && File(storePath).exists()) {
+                storeFile = File(storePath)
                 storePassword = System.getenv("SIGNING_STORE_PASSWORD")
                 keyAlias = System.getenv("SIGNING_KEY_ALIAS")
                 keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
@@ -42,7 +37,7 @@ android {
     }
 
     buildTypes {
-        val hasSigning = !System.getenv("SIGNING_KEYSTORE_B64").isNullOrEmpty()
+        val hasSigning = !System.getenv("SIGNING_KEYSTORE_PATH").isNullOrEmpty()
         debug {
             isMinifyEnabled = false
             buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
