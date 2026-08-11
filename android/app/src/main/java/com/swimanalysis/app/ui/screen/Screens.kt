@@ -3,14 +3,18 @@ package com.swimanalysis.app.ui.screen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -74,21 +78,41 @@ fun HomeScreen(navController: NavController) {
 @Composable
 fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
+    var showAddDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("比赛记录") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("比赛记录") },
+                actions = {
+                    IconButton(onClick = { viewModel.loadRecords() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = { showAddDialog = true },
+                icon = { Icon(Icons.Filled.Add, contentDescription = "添加") },
+                text = { Text("添加记录") }
+            )
+        }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (state.isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             } else if (state.records.isEmpty()) {
-                Text(
-                    text = "暂无记录",
+                Column(
                     modifier = Modifier.align(Alignment.Center),
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("暂无记录", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("点击右下角\"添加记录\"手动录入",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -113,20 +137,142 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                record.raceName?.let {
+                                record.raceName?.takeIf { it.isNotEmpty() }?.let {
                                     Text(
                                         text = it,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
                                     )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    record.raceDate?.takeIf { it.isNotEmpty() }?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    record.analysisResult?.let { ar ->
+                                        val totalTime = extractTotalTime(ar)
+                                        totalTime?.let {
+                                            Text(it, style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+
+            state.error?.let {
+                Text(
+                    text = "加载失败: $it",
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
+
+    if (showAddDialog) {
+        ManualRecordDialog(
+            onDismiss = { showAddDialog = false },
+            onConfirm = { name, distance, stroke, raceName, date, location, time ->
+                viewModel.addManualRecord(name, 50, distance, stroke, raceName, date, location, time)
+                showAddDialog = false
+            }
+        )
+    }
+
+    if (state.addSuccess) {
+        androidx.compose.material3.Snackbar(
+            modifier = Modifier.padding(16.dp),
+            action = {
+                androidx.compose.material3.TextButton(onClick = { viewModel.clearAddSuccess() }) {
+                    Text("确定")
+                }
+            }
+        ) { Text("记录添加成功") }
+    }
+}
+
+private fun extractTotalTime(jsonElement: kotlinx.serialization.json.JsonElement): String? {
+    return try {
+        val obj = jsonElement as? kotlinx.serialization.json.JsonObject ?: return null
+        obj["比赛总用时"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+            ?: obj["total_time"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+    } catch (e: Exception) { null }
+}
+
+@Composable
+private fun ManualRecordDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, Int, String, String, String, String, String) -> Unit
+) {
+    var swimmerName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("杨钧涵") }
+    var distance by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("50") }
+    var stroke by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("自由泳") }
+    var raceName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var raceDate by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var raceLocation by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var totalTime by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加比赛记录") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = swimmerName, onValueChange = { swimmerName = it },
+                    label = { Text("泳者姓名") }, modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = distance, onValueChange = { distance = it },
+                        label = { Text("距离(米)") }, modifier = Modifier.weight(1f)
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = stroke, onValueChange = { stroke = it },
+                        label = { Text("泳姿") }, modifier = Modifier.weight(1f)
+                    )
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = raceName, onValueChange = { raceName = it },
+                    label = { Text("比赛名称") }, modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = raceDate, onValueChange = { raceDate = it },
+                    label = { Text("比赛日期") }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("如 2025-06-15") }
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = raceLocation, onValueChange = { raceLocation = it },
+                    label = { Text("比赛地点") }, modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = totalTime, onValueChange = { totalTime = it },
+                    label = { Text("总成绩") }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("如 1:05.23") }
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    onConfirm(swimmerName, distance.toIntOrNull() ?: 50, stroke,
+                        raceName, raceDate, raceLocation, totalTime)
+                },
+                enabled = swimmerName.isNotEmpty() && totalTime.isNotEmpty()
+            ) { Text("添加") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -234,7 +380,10 @@ fun ProfileScreen(navController: NavController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecordDetailScreen(navController: NavController, recordId: String) {
+fun RecordDetailScreen(navController: NavController, recordId: String, viewModel: RecordsViewModel = hiltViewModel()) {
+    val state by viewModel.state.collectAsState()
+    val record = state.records.find { it.id == recordId }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -248,10 +397,63 @@ fun RecordDetailScreen(navController: NavController, recordId: String) {
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Text(
-                text = "记录ID: $recordId",
-                modifier = Modifier.align(Alignment.Center)
-            )
+            if (record == null) {
+                Text(
+                    text = if (state.isLoading) "加载中..." else "未找到记录",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(record.swimmerName, style = MaterialTheme.typography.titleLarge)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("${record.raceDistance}米${record.strokeType}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                                record.raceName?.takeIf { it.isNotEmpty() }?.let {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("比赛: $it", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                record.raceDate?.takeIf { it.isNotEmpty() }?.let {
+                                    Text("日期: $it", style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                record.raceLocation?.takeIf { it.isNotEmpty() }?.let {
+                                    Text("地点: $it", style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                    record.analysisResult?.let { ar ->
+                        item {
+                            Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("分析结果", style = MaterialTheme.typography.titleMedium)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val obj = ar as? kotlinx.serialization.json.JsonObject
+                                    obj?.forEach { (key, value) ->
+                                        Row(modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text(key, style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text((value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: value.toString(),
+                                                style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

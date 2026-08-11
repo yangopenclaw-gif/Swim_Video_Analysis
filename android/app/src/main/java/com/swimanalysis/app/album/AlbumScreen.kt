@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AssistChip
@@ -125,7 +126,7 @@ fun AlbumScreen(
                             style = MaterialTheme.typography.titleSmall
                         )
                         Text(
-                            text = "选择几张清晰正面照，用于AI识别",
+                            text = "选择2-3张清晰正面照作为参考，系统将在相册中自动找到此人的其他照片",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -141,7 +142,39 @@ fun AlbumScreen(
                         val refs = state.referenceUris[person] ?: emptyList()
                         if (refs.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("已添加 ${refs.size} 张参考照片", style = MaterialTheme.typography.bodySmall)
+                            Text("已添加 ${refs.size} 张参考照片：", style = MaterialTheme.typography.bodySmall)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(3),
+                                modifier = Modifier.fillMaxWidth().height(((refs.size / 3 + 1) * 100).dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(refs) { refUri ->
+                                    Box {
+                                        AsyncImage(
+                                            model = refUri,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(1f)
+                                                .clip(RoundedCornerShape(8.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        androidx.compose.material3.IconButton(
+                                            onClick = { viewModel.removeReferencePhoto(person, refUri) },
+                                            modifier = Modifier.align(Alignment.TopEnd).size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.Close,
+                                                contentDescription = "删除",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -169,6 +202,13 @@ fun AlbumScreen(
                 }
                 Text(if (state.isScanning) "扫描中..." else "扫描相册")
             }
+
+            Text(
+                text = "提示：扫描不会复制或移动照片，仅在相册中标记匹配的照片",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
 
             if (state.isScanning) {
                 Spacer(modifier = Modifier.height(8.dp))

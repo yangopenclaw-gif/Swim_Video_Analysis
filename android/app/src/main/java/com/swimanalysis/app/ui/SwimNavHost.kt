@@ -49,8 +49,7 @@ private data class BottomItem(
 private val bottomItems = listOf(
     BottomItem(Screen.Home, Icons.Filled.Home, "首页"),
     BottomItem(Screen.Records, Icons.Outlined.Analytics, "记录"),
-    BottomItem(Screen.Upload, Icons.Filled.Upload, "上传"),
-    BottomItem(Screen.Videos, Icons.Filled.PlayArrow, "视频"),
+
     BottomItem(Screen.Album, Icons.Outlined.PhotoLibrary, "相册"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
 )

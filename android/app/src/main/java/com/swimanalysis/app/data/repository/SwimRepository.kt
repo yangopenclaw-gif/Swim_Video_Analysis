@@ -111,6 +111,20 @@ class SwimRepository @Inject constructor(
 
     suspend fun getAllRecords(): List<RecordDto> = api.getAllRecords()
 
+    suspend fun manualRecord(
+        swimmerName: String, poolLength: Int, raceDistance: Int, strokeType: String,
+        swimmerPosition: Int, raceName: String, raceDate: String, raceLocation: String,
+        totalTime: String, linkedVideoId: String? = null
+    ) = api.manualRecord(
+        com.swimanalysis.app.data.model.ManualRecordRequest(
+            swimmerName, poolLength, raceDistance, strokeType, swimmerPosition,
+            raceName, raceDate, raceLocation, totalTime, linkedVideoId
+        )
+    )
+
+    suspend fun deleteRecord(taskId: String) =
+        api.deleteRecord(taskId, com.swimanalysis.app.data.model.DeleteRequest("ycz"))
+
     suspend fun compareRecords(id1: String, id2: String) = api.compareRecords(id1, id2)
 
     suspend fun getCompetitions(): List<CompetitionDto> = api.getCompetitions()

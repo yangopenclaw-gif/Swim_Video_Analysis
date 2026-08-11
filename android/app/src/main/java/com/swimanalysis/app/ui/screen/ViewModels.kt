@@ -19,7 +19,9 @@ import javax.inject.Inject
 data class RecordsUiState(
     val isLoading: Boolean = false,
     val records: List<RecordDto> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val isAdding: Boolean = false,
+    val addSuccess: Boolean = false
 )
 
 @HiltViewModel
@@ -43,6 +45,29 @@ class RecordsViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
         }
+    }
+
+    fun addManualRecord(
+        swimmerName: String, poolLength: Int, raceDistance: Int, strokeType: String,
+        raceName: String, raceDate: String, raceLocation: String, totalTime: String
+    ) {
+        _state.update { it.copy(isAdding = true, error = null) }
+        viewModelScope.launch {
+            try {
+                repository.manualRecord(
+                    swimmerName, poolLength, raceDistance, strokeType,
+                    swimmerPosition = 0, raceName, raceDate, raceLocation, totalTime
+                )
+                _state.update { it.copy(isAdding = false, addSuccess = true) }
+                loadRecords()
+            } catch (e: Exception) {
+                _state.update { it.copy(isAdding = false, error = e.message) }
+            }
+        }
+    }
+
+    fun clearAddSuccess() {
+        _state.update { it.copy(addSuccess = false) }
     }
 }
 

@@ -108,7 +108,7 @@ data class RecordDto(
     @SerialName("stroke_type") val strokeType: String = "",
     @SerialName("swimmer_position") val swimmerPosition: Int = 0,
     @SerialName("video_filename") val videoFilename: String? = null,
-    @SerialName("analysis_result") val analysisResult: String = "",
+    @SerialName("analysis_result") val analysisResult: JsonElement? = null,
     @SerialName("created_at") val createdAt: String = "",
     val archived: Boolean = false,
     @SerialName("archive_time") val archiveTime: String? = null,
