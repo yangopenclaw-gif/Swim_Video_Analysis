@@ -872,7 +872,10 @@ async def create_manual_record(request: Request):
     race_name = body.get("race_name", "")
     race_date = body.get("race_date", "")
     race_location = body.get("race_location", "")
-    metrics = body.get("metrics", {})
+    metrics = body.get("metrics") or {}
+    total_time = body.get("total_time", "")
+    if total_time and "比赛总用时" not in metrics:
+        metrics["比赛总用时"] = total_time
     linked_video_id = body.get("linked_video_id")
 
     if competition_id:

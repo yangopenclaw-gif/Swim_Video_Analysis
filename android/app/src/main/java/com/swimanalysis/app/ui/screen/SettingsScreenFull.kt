@@ -29,12 +29,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.swimanalysis.app.BuildConfig
@@ -50,6 +52,13 @@ fun SettingsScreenFull(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var serverUrl = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(BuildConfig.SERVER_BASE_URL) }
+
+    LaunchedEffect(state.saveAsMessage) {
+        state.saveAsMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearSaveAsMessage()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -214,6 +223,11 @@ fun SettingsScreenFull(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = { viewModel.saveCurrentApk(context) }
+                                ) {
+                                    Text("另存为")
+                                }
                                 Button(onClick = { viewModel.installCurrentApk(context) }) {
                                     Text("立即安装")
                                 }

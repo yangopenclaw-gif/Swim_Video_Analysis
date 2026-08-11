@@ -1,18 +1,24 @@
 package com.swimanalysis.app.ui.screen
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swimanalysis.app.data.local.AvatarStore
 import com.swimanalysis.app.data.model.RecordDto
 import com.swimanalysis.app.data.model.VideoDto
 import com.swimanalysis.app.data.repository.SwimRepository
 import com.swimanalysis.app.upload.ChunkUploader
 import com.swimanalysis.app.upload.UploadState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -21,18 +27,57 @@ data class RecordsUiState(
     val records: List<RecordDto> = emptyList(),
     val error: String? = null,
     val isAdding: Boolean = false,
-    val addSuccess: Boolean = false
+    val addSuccess: Boolean = false,
+    val avatarPaths: Map<String, String> = emptyMap()
 )
 
 @HiltViewModel
 class RecordsViewModel @Inject constructor(
-    private val repository: SwimRepository
+    private val repository: SwimRepository,
+    @ApplicationContext private val context: Context,
+    private val avatarStore: AvatarStore
 ) : ViewModel() {
     private val _state = MutableStateFlow(RecordsUiState(isLoading = true))
     val state: StateFlow<RecordsUiState> = _state.asStateFlow()
 
+    companion object {
+        val PERSONS = listOf("杨钧涵", "杨涴婷")
+    }
+
     init {
         loadRecords()
+        loadAvatars()
+    }
+
+    fun loadAvatars() {
+        PERSONS.forEach { name ->
+            viewModelScope.launch {
+                avatarStore.avatarPath(name).collect { path ->
+                    _state.update {
+                        it.copy(avatarPaths = it.avatarPaths + (name to (path ?: "")))
+                    }
+                }
+            }
+        }
+    }
+
+    fun saveAvatar(name: String, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val path = withContext(Dispatchers.IO) {
+                    val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+                    val dest = File(dir, "$name.jpg")
+                    context.contentResolver.openInputStream(uri)?.use { ins ->
+                        dest.outputStream().use { out -> ins.copyTo(out) }
+                    }
+                    dest.absolutePath
+                }
+                avatarStore.saveAvatarPath(name, path)
+                _state.update { it.copy(avatarPaths = it.avatarPaths + (name to path)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "头像保存失败: ${e.message}") }
+            }
+        }
     }
 
     fun loadRecords() {

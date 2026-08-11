@@ -1,5 +1,9 @@
 package com.swimanalysis.app.ui.screen
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,11 +13,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
@@ -29,13 +38,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.swimanalysis.app.ui.navigation.Screen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,12 +93,168 @@ fun HomeScreen(navController: NavController) {
 @Composable
 fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
-    var showAddDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var pendingAvatarName by remember { mutableStateOf<String?>(null) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { pendingAvatarName?.let { name -> viewModel.saveAvatar(name, it) } }
+        pendingAvatarName = null
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("比赛记录") },
+                actions = {
+                    IconButton(onClick = { viewModel.loadRecords() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (state.isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "选择泳者查看个人记录",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    items(RecordsViewModel.PERSONS) { name ->
+                        SwimmerCard(
+                            name = name,
+                            avatarPath = state.avatarPaths[name],
+                            recordCount = state.records.count { it.swimmerName == name },
+                            onClick = { navController.navigate(Screen.SwimmerRecords.withArgs(name)) },
+                            onEditAvatar = {
+                                pendingAvatarName = name
+                                galleryLauncher.launch("image/*")
+                            }
+                        )
+                    }
+                }
+            }
+
+            state.error?.let {
+                Text(
+                    text = "加载失败: $it",
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwimmerCard(
+    name: String,
+    avatarPath: String?,
+    recordCount: Int,
+    onClick: () -> Unit,
+    onEditAvatar: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box {
+                val hasAvatar = !avatarPath.isNullOrEmpty() && java.io.File(avatarPath).exists()
+                if (hasAvatar) {
+                    AsyncImage(
+                        model = java.io.File(avatarPath),
+                        contentDescription = "$name 的头像",
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onEditAvatar,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(28.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.CameraAlt,
+                        contentDescription = "编辑头像",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.size(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "$recordCount 条记录",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwimmerRecordsScreen(
+    navController: NavController,
+    swimmerName: String,
+    viewModel: RecordsViewModel = hiltViewModel()
+) {
+    val state by viewModel.state.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+    val swimmerRecords = state.records.filter { it.swimmerName == swimmerName }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("$swimmerName 的记录") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
                 actions = {
                     IconButton(onClick = { viewModel.loadRecords() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
@@ -103,7 +273,7 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (state.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else if (state.records.isEmpty()) {
+            } else if (swimmerRecords.isEmpty()) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -117,54 +287,18 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(state.records) { record ->
-                        Card(
-                            modifier = Modifier.fillMaxSize(),
+                    items(swimmerRecords) { record ->
+                        RecordCard(
+                            record = record,
                             onClick = {
                                 navController.navigate(Screen.RecordDetail.withArgs(record.id))
-                            },
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    text = record.swimmerName,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "${record.raceDistance}米${record.strokeType}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                record.raceName?.takeIf { it.isNotEmpty() }?.let {
-                                    Text(
-                                        text = it,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    record.raceDate?.takeIf { it.isNotEmpty() }?.let {
-                                        Text(it, style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    record.analysisResult?.let { ar ->
-                                        val totalTime = extractTotalTime(ar)
-                                        totalTime?.let {
-                                            Text(it, style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                                        }
-                                    }
-                                }
                             }
-                        }
+                        )
                     }
                 }
             }
@@ -181,6 +315,7 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
 
     if (showAddDialog) {
         ManualRecordDialog(
+            defaultName = swimmerName,
             onDismiss = { showAddDialog = false },
             onConfirm = { name, distance, stroke, raceName, date, location, time ->
                 viewModel.addManualRecord(name, 50, distance, stroke, raceName, date, location, time)
@@ -201,20 +336,107 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
     }
 }
 
+@Composable
+private fun RecordCard(
+    record: com.swimanalysis.app.data.model.RecordDto,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = record.swimmerName,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "${record.raceDistance}米${record.strokeType}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            record.raceName?.takeIf { it.isNotEmpty() }?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                record.raceDate?.takeIf { it.isNotEmpty() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                record.analysisResult?.let { ar ->
+                    val totalTime = extractTotalTime(ar)
+                    totalTime?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun extractTotalTime(jsonElement: kotlinx.serialization.json.JsonElement): String? {
-    return try {
+    val raw = try {
         val obj = jsonElement as? kotlinx.serialization.json.JsonObject ?: return null
         obj["比赛总用时"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
             ?: obj["total_time"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-    } catch (e: Exception) { null }
+    } catch (e: Exception) { null } ?: return null
+    return formatTotalTime(raw)
+}
+
+private val TIME_KEYS = setOf(
+    "比赛总用时", "总用时", "total_time",
+    "第1半程用时", "第2半程用时", "前程用时", "后程用时",
+    "转身出水用时", "转身用时"
+)
+
+fun formatTotalTime(raw: String): String? {
+    val seconds = parseSeconds(raw) ?: return raw
+    val minutes = (seconds / 60).toInt()
+    val sec = seconds % 60
+    return if (minutes > 0) {
+        val secStr = "%.2f".format(sec).let { if (sec < 10) "0$it" else it }
+        "${minutes}分${secStr}秒"
+    } else {
+        "%.2f秒".format(sec)
+    }
+}
+
+private fun parseSeconds(raw: String): Double? {
+    val trimmed = raw.trim()
+    if (trimmed.contains("分")) {
+        val parts = trimmed.split("分")
+        val m = parts.getOrNull(0)?.toDoubleOrNull() ?: return null
+        val sPart = parts.getOrNull(1)?.removeSuffix("秒")?.trim() ?: "0"
+        val s = sPart.toDoubleOrNull() ?: return null
+        return m * 60 + s
+    }
+    if (trimmed.contains(":")) {
+        val parts = trimmed.split(":")
+        val m = parts.getOrNull(0)?.toDoubleOrNull() ?: return null
+        val s = parts.getOrNull(1)?.toDoubleOrNull() ?: return null
+        return m * 60 + s
+    }
+    return trimmed.toDoubleOrNull()
 }
 
 @Composable
 private fun ManualRecordDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String, Int, String, String, String, String, String) -> Unit
+    onConfirm: (String, Int, String, String, String, String, String) -> Unit,
+    defaultName: String = "杨钧涵"
 ) {
-    var swimmerName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("杨钧涵") }
+    var swimmerName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(defaultName) }
     var distance by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("50") }
     var stroke by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("自由泳") }
     var raceName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
@@ -257,7 +479,7 @@ private fun ManualRecordDialog(
                 androidx.compose.material3.OutlinedTextField(
                     value = totalTime, onValueChange = { totalTime = it },
                     label = { Text("总成绩") }, modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("如 1:05.23") }
+                    placeholder = { Text("如 1:05.23 或 65.23 秒") }
                 )
             }
         },
@@ -441,11 +663,17 @@ fun RecordDetailScreen(navController: NavController, recordId: String, viewModel
                                     Spacer(modifier = Modifier.height(8.dp))
                                     val obj = ar as? kotlinx.serialization.json.JsonObject
                                     obj?.forEach { (key, value) ->
+                                        val rawValue = (value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: value.toString()
+                                        val displayValue = if (key in TIME_KEYS) {
+                                            formatTotalTime(rawValue) ?: rawValue
+                                        } else {
+                                            rawValue
+                                        }
                                         Row(modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween) {
                                             Text(key, style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text((value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: value.toString(),
+                                            Text(displayValue,
                                                 style = MaterialTheme.typography.bodyMedium)
                                         }
                                     }

@@ -16,6 +16,7 @@ sealed class Screen(val route: String, val title: String) {
     data object Competitions : Screen("competitions", "比赛管理")
     data object AiRecognize : Screen("ai_recognize", "AI识别")
     data object SwimmerProfile : Screen("swimmer/{name}", "泳者档案")
+    data object SwimmerRecords : Screen("swimmer_records/{name}", "个人记录")
     data object Settings : Screen("settings", "设置")
 
     fun withArgs(vararg args: String): String {

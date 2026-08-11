@@ -1,8 +1,12 @@
 package com.swimanalysis.app.update
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -78,6 +82,36 @@ class UpdateDownloader @Inject constructor() {
             emit(state.copy(status = DownloadStatus.FAILED))
         }
     }.flowOn(Dispatchers.IO)
+
+    fun saveApkAs(context: Context, sourcePath: String, fileName: String = "swim-analysis-update.apk"): String? {
+        val src = File(sourcePath)
+        if (!src.exists()) return null
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return null
+                resolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+                uri.toString()
+            } else {
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!dir.exists()) dir.mkdirs()
+                val dest = File(dir, fileName)
+                src.copyTo(dest, overwrite = true)
+                dest.absolutePath
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("UpdateDownloader", "另存为失败", e)
+            null
+        }
+    }
 
     fun installApk(context: Context, filePath: String) {
         val file = File(filePath)

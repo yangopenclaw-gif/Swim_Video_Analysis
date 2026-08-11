@@ -31,7 +31,8 @@ data class SettingsUiState(
     val apkDownloadStatus: DownloadStatus = DownloadStatus.IDLE,
     val apkDownloadProgress: Float = 0f,
     val apkFilePath: String = "",
-    val apkDownloadError: String? = null
+    val apkDownloadError: String? = null,
+    val saveAsMessage: String? = null
 )
 
 @HiltViewModel
@@ -135,5 +136,22 @@ class SettingsViewModel @Inject constructor(
         _state.update {
             it.copy(apkDownloadStatus = DownloadStatus.IDLE, apkDownloadProgress = 0f, apkFilePath = "", apkDownloadError = null)
         }
+    }
+
+    fun saveCurrentApk(context: Context) {
+        val filePath = _state.value.apkFilePath
+        if (filePath.isEmpty()) return
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                downloader.saveApkAs(context, filePath, "swim-analysis-v${BuildConfig.VERSION_NAME}.apk")
+            }
+            _state.update {
+                it.copy(saveAsMessage = if (saved != null) "已保存到系统下载目录" else "另存为失败，请重试")
+            }
+        }
+    }
+
+    fun clearSaveAsMessage() {
+        _state.update { it.copy(saveAsMessage = null) }
     }
 }

@@ -33,6 +33,7 @@ import com.swimanalysis.app.ui.screen.HomeScreen
 import com.swimanalysis.app.ui.screen.RecordDetailScreen
 import com.swimanalysis.app.ui.screen.RecordsScreen
 import com.swimanalysis.app.ui.screen.SettingsScreenFull
+import com.swimanalysis.app.ui.screen.SwimmerRecordsScreen
 import com.swimanalysis.app.ui.screen.UploadScreenFull
 import com.swimanalysis.app.ui.screen.VideoAnnotateScreenFull
 import com.swimanalysis.app.ui.screen.VideoPlayerScreenFull
@@ -104,6 +105,10 @@ fun SwimNavHost() {
             composable(Screen.RecordDetail.route) { backStack ->
                 val recordId = backStack.arguments?.getString("recordId") ?: ""
                 RecordDetailScreen(navController, recordId)
+            }
+            composable(Screen.SwimmerRecords.route) { backStack ->
+                val name = backStack.arguments?.getString("name") ?: ""
+                SwimmerRecordsScreen(navController, name)
             }
             composable(Screen.VideoPlayer.route) { backStack ->
                 val videoId = backStack.arguments?.getString("videoId") ?: ""

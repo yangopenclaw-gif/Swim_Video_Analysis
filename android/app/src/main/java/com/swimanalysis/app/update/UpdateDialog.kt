@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -21,11 +22,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Context
+import android.widget.Toast
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -34,6 +38,9 @@ class UpdateViewModel @Inject constructor(
 ) : ViewModel() {
     private val _downloadState = MutableStateFlow(DownloadState())
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
+
+    private val _saveAsState = MutableStateFlow<String?>(null)
+    val saveAsState: StateFlow<String?> = _saveAsState.asStateFlow()
 
     fun startDownload(context: Context, url: String) {
         viewModelScope.launch {
@@ -47,8 +54,22 @@ class UpdateViewModel @Inject constructor(
         downloader.installApk(context, filePath)
     }
 
+    fun saveAs(context: Context, filePath: String) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                downloader.saveApkAs(context, filePath)
+            }
+            _saveAsState.value = if (saved != null) "已保存到系统下载目录" else "另存为失败，请重试"
+        }
+    }
+
+    fun clearSaveAsState() {
+        _saveAsState.value = null
+    }
+
     fun reset() {
         _downloadState.value = DownloadState()
+        _saveAsState.value = null
     }
 }
 
@@ -60,20 +81,43 @@ fun UpdateDialog(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val downloadState by viewModel.downloadState.collectAsState()
+    val saveAsState by viewModel.saveAsState.collectAsState()
+
+    LaunchedEffect(saveAsState) {
+        saveAsState?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearSaveAsState()
+        }
+    }
 
     when {
         downloadState.status == DownloadStatus.COMPLETED -> {
             AlertDialog(
                 onDismissRequest = { viewModel.reset(); onDismiss() },
                 title = { Text("下载完成") },
-                text = { Text("新版本已下载完成，是否立即安装？") },
+                text = {
+                    Column {
+                        Text("新版本已下载完成，是否立即安装？")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "也可另存为APK文件到系统下载目录，方便以后安装",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         viewModel.install(context, downloadState.filePath)
                     }) { Text("立即安装") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { viewModel.reset(); onDismiss() }) { Text("稍后") }
+                    Row {
+                        TextButton(onClick = {
+                            viewModel.saveAs(context, downloadState.filePath)
+                        }) { Text("另存为") }
+                        TextButton(onClick = { viewModel.reset(); onDismiss() }) { Text("稍后") }
+                    }
                 }
             )
         }
