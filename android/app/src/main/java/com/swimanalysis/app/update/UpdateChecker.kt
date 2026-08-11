@@ -31,6 +31,46 @@ class UpdateChecker @Inject constructor() {
         private const val OWNER = "yangopenclaw-gif"
         private const val REPO = "Swim_Video_Analysis"
         private const val API_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+        private const val TAG_API_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/tags"
+    }
+
+    suspend fun getAssetDownloadUrl(versionName: String): String = withContext(Dispatchers.IO) {
+        val json = Json { ignoreUnknownKeys = true }
+        val tag = "v$versionName"
+        try {
+            val conn = (URL("$TAG_API_URL/$tag").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 15000
+                setRequestProperty("Accept", "application/vnd.github+json")
+            }
+            try {
+                if (conn.responseCode != 200) return@withContext ""
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val release = json.parseToJsonElement(body).jsonObject
+                val assets = release["assets"]?.jsonArray ?: JsonArray(emptyList())
+
+                for (asset in assets) {
+                    val obj = asset.jsonObject
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                    if (name.endsWith(".apk") && name.contains("debug")) {
+                        return@withContext obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
+                    }
+                }
+
+                for (asset in assets) {
+                    val obj = asset.jsonObject
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                    if (name.endsWith(".apk")) {
+                        return@withContext obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
+                    }
+                }
+                ""
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     suspend fun checkForUpdate(): UpdateInfo = withContext(Dispatchers.IO) {

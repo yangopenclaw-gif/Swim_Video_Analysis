@@ -1,10 +1,13 @@
 package com.swimanalysis.app.ui.screen
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.data.repository.SwimRepository
+import com.swimanalysis.app.update.DownloadStatus
 import com.swimanalysis.app.update.UpdateChecker
+import com.swimanalysis.app.update.UpdateDownloader
 import com.swimanalysis.app.update.UpdateInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -24,13 +27,18 @@ data class SettingsUiState(
     val testSuccess: Boolean = false,
     val isCheckingUpdate: Boolean = false,
     val updateInfo: UpdateInfo? = null,
-    val updateError: String? = null
+    val updateError: String? = null,
+    val apkDownloadStatus: DownloadStatus = DownloadStatus.IDLE,
+    val apkDownloadProgress: Float = 0f,
+    val apkFilePath: String = "",
+    val apkDownloadError: String? = null
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SwimRepository,
-    private val updateChecker: UpdateChecker
+    private val updateChecker: UpdateChecker,
+    private val downloader: UpdateDownloader
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -82,5 +90,50 @@ class SettingsViewModel @Inject constructor(
 
     fun clearUpdateInfo() {
         _state.update { it.copy(updateInfo = null, updateError = null) }
+    }
+
+    fun downloadCurrentApk(context: Context) {
+        if (_state.value.apkDownloadStatus == DownloadStatus.DOWNLOADING) return
+        _state.update {
+            it.copy(apkDownloadStatus = DownloadStatus.DOWNLOADING, apkDownloadProgress = 0f, apkDownloadError = null)
+        }
+        viewModelScope.launch {
+            try {
+                val url = updateChecker.getAssetDownloadUrl(BuildConfig.VERSION_NAME)
+                if (url.isEmpty()) {
+                    _state.update {
+                        it.copy(apkDownloadStatus = DownloadStatus.FAILED, apkDownloadError = "当前版本未找到APK文件")
+                    }
+                    return@launch
+                }
+                downloader.download(context, url).collect { ds ->
+                    _state.update {
+                        it.copy(
+                            apkDownloadStatus = ds.status,
+                            apkDownloadProgress = ds.progress,
+                            apkFilePath = ds.filePath,
+                            apkDownloadError = if (ds.status == DownloadStatus.FAILED) "下载失败，请检查网络" else it.apkDownloadError
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(apkDownloadStatus = DownloadStatus.FAILED, apkDownloadError = "获取下载地址失败: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun installCurrentApk(context: Context) {
+        val filePath = _state.value.apkFilePath
+        if (filePath.isNotEmpty()) {
+            downloader.installApk(context, filePath)
+        }
+    }
+
+    fun resetApkDownload() {
+        _state.update {
+            it.copy(apkDownloadStatus = DownloadStatus.IDLE, apkDownloadProgress = 0f, apkFilePath = "", apkDownloadError = null)
+        }
     }
 }
