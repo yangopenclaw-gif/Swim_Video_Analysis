@@ -35,6 +35,13 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Setup signing keystore
+        run: |
+          echo "SIGNING_KEYSTORE_B64=${{ secrets.SIGNING_KEYSTORE_B64 }}" >> $GITHUB_ENV
+          echo "SIGNING_STORE_PASSWORD=${{ secrets.SIGNING_STORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "SIGNING_KEY_PASSWORD=${{ secrets.SIGNING_KEY_PASSWORD }}" >> $GITHUB_ENV
+          echo "SIGNING_KEY_ALIAS=${{ secrets.SIGNING_KEY_ALIAS }}" >> $GITHUB_ENV
+
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 

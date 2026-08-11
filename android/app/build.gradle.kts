@@ -14,14 +14,51 @@ android {
         applicationId = "com.swimanalysis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.2.3"
+        versionCode = 9
+        versionName = "1.2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
         buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
         buildConfigField("String", "RECORD_PASSWORD", "\"ycz\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystoreB64 = System.getenv("SIGNING_KEYSTORE_B64")
+            if (!keystoreB64.isNullOrEmpty()) {
+                val storePath = System.getenv("SIGNING_KEYSTORE_PATH")
+                    ?: "${rootProject.buildDir}/signing.keystore"
+                val keystoreFile = File(storePath)
+                keystoreFile.parentFile?.mkdirs()
+                keystoreFile.writeBytes(java.util.Base64.getDecoder().decode(keystoreB64))
+                storeFile = keystoreFile
+                storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        val hasSigning = !System.getenv("SIGNING_KEYSTORE_B64").isNullOrEmpty()
+        debug {
+            isMinifyEnabled = false
+            buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 
     buildTypes {
