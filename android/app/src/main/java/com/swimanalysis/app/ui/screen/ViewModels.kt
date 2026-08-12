@@ -1,6 +1,7 @@
 package com.swimanalysis.app.ui.screen
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -28,7 +29,10 @@ data class RecordsUiState(
     val error: String? = null,
     val isAdding: Boolean = false,
     val addSuccess: Boolean = false,
-    val avatarPaths: Map<String, String> = emptyMap()
+    val avatarPaths: Map<String, String> = emptyMap(),
+    val recognizeLoading: Boolean = false,
+    val recognizeResult: Map<String, Any>? = null,
+    val recognizeError: String? = null
 )
 
 @HiltViewModel
@@ -80,6 +84,23 @@ class RecordsViewModel @Inject constructor(
         }
     }
 
+    fun saveAvatarBitmap(name: String, bitmap: Bitmap) {
+        viewModelScope.launch {
+            try {
+                val path = withContext(Dispatchers.IO) {
+                    val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+                    val dest = File(dir, "$name.jpg")
+                    dest.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out) }
+                    dest.absolutePath
+                }
+                avatarStore.saveAvatarPath(name, path)
+                _state.update { it.copy(avatarPaths = it.avatarPaths + (name to path)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "头像保存失败: ${e.message}") }
+            }
+        }
+    }
+
     fun loadRecords() {
         _state.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
@@ -113,6 +134,22 @@ class RecordsViewModel @Inject constructor(
 
     fun clearAddSuccess() {
         _state.update { it.copy(addSuccess = false) }
+    }
+
+    fun recognizeImage(file: File) {
+        _state.update { it.copy(recognizeLoading = true, recognizeError = null, recognizeResult = null) }
+        viewModelScope.launch {
+            try {
+                val result = repository.recognizeImage(file)
+                _state.update { it.copy(recognizeLoading = false, recognizeResult = result) }
+            } catch (e: Exception) {
+                _state.update { it.copy(recognizeLoading = false, recognizeError = e.message) }
+            }
+        }
+    }
+
+    fun clearRecognize() {
+        _state.update { it.copy(recognizeResult = null, recognizeError = null) }
     }
 }
 

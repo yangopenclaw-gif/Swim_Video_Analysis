@@ -14,8 +14,8 @@ android {
         applicationId = "com.swimanalysis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.2.6"
+        versionCode = 12
+        versionName = "1.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -56,18 +56,6 @@ android {
         }
     }
 
-    buildTypes {
-        debug {
-            isMinifyEnabled = false
-            buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
-        }
-        release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "SERVER_BASE_URL", "\"http://139.159.249.62:8000\"")
-        }
-    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

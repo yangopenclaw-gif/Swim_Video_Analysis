@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,13 +17,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
@@ -40,16 +44,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.swimanalysis.app.media.VideoPicker
 import com.swimanalysis.app.ui.navigation.Screen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,12 +101,12 @@ fun HomeScreen(navController: NavController) {
 fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     var pendingAvatarName by remember { mutableStateOf<String?>(null) }
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { pendingAvatarName?.let { name -> viewModel.saveAvatar(name, it) } }
-        pendingAvatarName = null
+        if (uri != null) pendingCropUri = uri
     }
 
     Scaffold(
@@ -154,6 +161,24 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
             }
         }
     }
+
+    pendingCropUri?.let { uri ->
+        val name = pendingAvatarName
+        if (name != null) {
+            AvatarCropDialog(
+                imageUri = uri,
+                onConfirm = { bitmap ->
+                    viewModel.saveAvatarBitmap(name, bitmap)
+                    pendingCropUri = null
+                    pendingAvatarName = null
+                },
+                onDismiss = {
+                    pendingCropUri = null
+                    pendingAvatarName = null
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -175,45 +200,33 @@ private fun SwimmerCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .clickable { onEditAvatar() }
+            ) {
                 val hasAvatar = !avatarPath.isNullOrEmpty() && java.io.File(avatarPath).exists()
                 if (hasAvatar) {
                     AsyncImage(
                         model = java.io.File(avatarPath),
                         contentDescription = "$name 的头像",
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
+                            .fillMaxSize()
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Filled.Person,
-                            contentDescription = null,
+                            contentDescription = "点击设置头像",
                             modifier = Modifier.size(36.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
-                }
-                IconButton(
-                    onClick = onEditAvatar,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(28.dp)
-                        .background(MaterialTheme.colorScheme.surface, CircleShape),
-                ) {
-                    Icon(
-                        Icons.Filled.CameraAlt,
-                        contentDescription = "编辑头像",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
                 }
             }
             Spacer(modifier = Modifier.size(16.dp))
@@ -434,21 +447,48 @@ private fun parseSeconds(raw: String): Double? {
 private fun ManualRecordDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, Int, String, String, String, String, String) -> Unit,
-    defaultName: String = "杨钧涵"
+    defaultName: String = "杨钧涵",
+    viewModel: RecordsViewModel = hiltViewModel()
 ) {
-    var swimmerName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(defaultName) }
-    var distance by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("50") }
-    var stroke by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("自由泳") }
-    var raceName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
-    var raceDate by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
-    var raceLocation by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
-    var totalTime by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    val context = LocalContext.current
+    val state by viewModel.state.collectAsState()
+    var swimmerName by remember { mutableStateOf(defaultName) }
+    var distance by remember { mutableStateOf("50") }
+    var stroke by remember { mutableStateOf("自由泳") }
+    var raceName by remember { mutableStateOf("") }
+    var raceDate by remember { mutableStateOf("") }
+    var raceLocation by remember { mutableStateOf("") }
+    var totalTime by remember { mutableStateOf("") }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            VideoPicker.uriToFile(context, uri)?.let { viewModel.recognizeImage(it) }
+        }
+    }
+
+    LaunchedEffect(state.recognizeResult) {
+        val result = state.recognizeResult ?: return@LaunchedEffect
+        val data = result["data"] as? Map<*, *> ?: return@LaunchedEffect
+        fun s(k: String): String = data[k]?.toString()?.takeIf { it.isNotBlank() } ?: ""
+        s("race_distance").let { if (it.isNotEmpty()) distance = it }
+        s("stroke_type").let { if (it.isNotEmpty()) stroke = it }
+        s("race_name").let { if (it.isNotEmpty()) raceName = it }
+        s("race_date").let { if (it.isNotEmpty()) raceDate = it }
+        s("race_location").let { if (it.isNotEmpty()) raceLocation = it }
+        s("比赛总用时").let { if (it.isNotEmpty()) totalTime = it }
+        viewModel.clearRecognize()
+    }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("添加比赛记录") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 androidx.compose.material3.OutlinedTextField(
                     value = swimmerName, onValueChange = { swimmerName = it },
                     label = { Text("泳者姓名") }, modifier = Modifier.fillMaxWidth()
@@ -481,6 +521,38 @@ private fun ManualRecordDialog(
                     label = { Text("总成绩") }, modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("如 1:05.23 或 65.23 秒") }
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { galleryLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.recognizeLoading
+                ) {
+                    if (state.recognizeLoading) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp), strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    } else {
+                        Icon(Icons.Filled.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text(if (state.recognizeLoading) "AI识别中..." else "AI识别成绩单自动填充")
+                }
+                state.recognizeError?.let {
+                    Text(
+                        text = "识别失败: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (state.recognizeResult != null) {
+                    Text(
+                        text = "已识别并填充，请核对后点击添加",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         },
         confirmButton = {

@@ -130,80 +130,99 @@ class FaceRecognizer {
         val pixels = IntArray(size)
         faceBitmap.getPixels(pixels, 0, FACE_SIZE, 0, 0, FACE_SIZE, FACE_SIZE)
 
-        val gray = FloatArray(size)
-        for (i in pixels.indices) {
-            gray[i] = grayValue(pixels[i])
-        }
+        val gray = IntArray(size) { grayValue(pixels[it]).toInt().coerceIn(0, 255) }
+        val equalized = histogramEqualizeInt(gray)
+        val lbp = computeLBPImage(equalized)
+        val lbph = computeLBPH(lbp)
+        val grayHist = computeGrayBlockHist(equalized)
 
-        val equalized = histogramEqualize(gray)
-
-        var mean = 0f
-        for (v in equalized) mean += v
-        mean /= size
-
-        var std = 0f
-        for (i in equalized.indices) {
-            equalized[i] -= mean
-            std += equalized[i] * equalized[i]
-        }
-        std = sqrt(std / size)
-        if (std > 0.1f) {
-            for (i in equalized.indices) {
-                equalized[i] /= std
-            }
-        }
-
-        val lbp = computeLBP(pixels)
-
-        val embedding = FloatArray(size + lbp.size)
-        System.arraycopy(equalized, 0, embedding, 0, size)
-        for (i in lbp.indices) {
-            embedding[size + i] = lbp[i] * 0.5f
-        }
-
+        val embedding = FloatArray(lbph.size + grayHist.size)
+        for (i in lbph.indices) embedding[i] = lbph[i]
+        for (i in grayHist.indices) embedding[lbph.size + i] = grayHist[i] * 0.3f
         return normalize(embedding)
     }
 
-    private fun histogramEqualize(gray: FloatArray): FloatArray {
+    private fun histogramEqualizeInt(gray: IntArray): IntArray {
         val hist = IntArray(256)
-        for (v in gray) {
-            val bin = v.toInt().coerceIn(0, 255)
-            hist[bin]++
-        }
+        for (v in gray) hist[v]++
         val cdf = IntArray(256)
         cdf[0] = hist[0]
         for (i in 1 until 256) cdf[i] = cdf[i - 1] + hist[i]
         val cdfMin = cdf.first { it > 0 }
         val total = gray.size
-        val lut = FloatArray(256)
+        val lut = IntArray(256)
         for (i in 0 until 256) {
-            lut[i] = ((cdf[i] - cdfMin).toFloat() / (total - cdfMin) * 255f).coerceIn(0f, 255f)
+            lut[i] = ((cdf[i] - cdfMin).toFloat() / (total - cdfMin) * 255f).toInt().coerceIn(0, 255)
         }
-        return FloatArray(total) { i -> lut[gray[i].toInt().coerceIn(0, 255)] }
+        return IntArray(total) { i -> lut[gray[i]] }
     }
 
-    private fun computeLBP(pixels: IntArray): FloatArray {
+    private fun computeLBPImage(gray: IntArray): IntArray {
         val w = FACE_SIZE
         val h = FACE_SIZE
-        val lbp = FloatArray(w * h)
-
+        val lbp = IntArray(w * h)
         for (y in 1 until h - 1) {
             for (x in 1 until w - 1) {
-                val center = grayValue(pixels[y * w + x])
+                val c = gray[y * w + x]
                 var code = 0
-                if (grayValue(pixels[(y - 1) * w + (x - 1)]) >= center) code = code or 1
-                if (grayValue(pixels[(y - 1) * w + x]) >= center) code = code or 2
-                if (grayValue(pixels[(y - 1) * w + (x + 1)]) >= center) code = code or 4
-                if (grayValue(pixels[y * w + (x + 1)]) >= center) code = code or 8
-                if (grayValue(pixels[(y + 1) * w + (x + 1)]) >= center) code = code or 16
-                if (grayValue(pixels[(y + 1) * w + x]) >= center) code = code or 32
-                if (grayValue(pixels[(y + 1) * w + (x - 1)]) >= center) code = code or 64
-                if (grayValue(pixels[y * w + (x - 1)]) >= center) code = code or 128
-                lbp[y * w + x] = code.toFloat() / 255f
+                if (gray[(y - 1) * w + (x - 1)] >= c) code = code or 1
+                if (gray[(y - 1) * w + x] >= c) code = code or 2
+                if (gray[(y - 1) * w + (x + 1)] >= c) code = code or 4
+                if (gray[y * w + (x + 1)] >= c) code = code or 8
+                if (gray[(y + 1) * w + (x + 1)] >= c) code = code or 16
+                if (gray[(y + 1) * w + x] >= c) code = code or 32
+                if (gray[(y + 1) * w + (x - 1)] >= c) code = code or 64
+                if (gray[y * w + (x - 1)] >= c) code = code or 128
+                lbp[y * w + x] = code
             }
         }
         return lbp
     }
+
+    private fun computeLBPH(lbp: IntArray): FloatArray {
+        val blocks = 4
+        val blockW = FACE_SIZE / blocks
+        val blockH = FACE_SIZE / blocks
+        val hist = FloatArray(blocks * blocks * 256)
+        for (by in 0 until blocks) {
+            for (bx in 0 until blocks) {
+                val offset = (by * blocks + bx) * 256
+                var count = 0
+                for (y in by * blockH until (by + 1) * blockH) {
+                    for (x in bx * blockW until (bx + 1) * blockW) {
+                        hist[offset + (lbp[y * FACE_SIZE + x] and 0xFF)]++
+                        count++
+                    }
+                }
+                if (count > 0) for (i in 0 until 256) hist[offset + i] /= count.toFloat()
+            }
+        }
+        return hist
+    }
+
+    private fun computeGrayBlockHist(gray: IntArray): FloatArray {
+        val blocks = 4
+        val blockW = FACE_SIZE / blocks
+        val blockH = FACE_SIZE / blocks
+        val bins = 16
+        val hist = FloatArray(blocks * blocks * bins)
+        for (by in 0 until blocks) {
+            for (bx in 0 until blocks) {
+                val offset = (by * blocks + bx) * bins
+                var count = 0
+                for (y in by * blockH until (by + 1) * blockH) {
+                    for (x in bx * blockW until (bx + 1) * blockW) {
+                        val v = gray[y * FACE_SIZE + x].coerceIn(0, 255)
+                        hist[offset + v * bins / 256]++
+                        count++
+                    }
+                }
+                if (count > 0) for (i in 0 until bins) hist[offset + i] /= count.toFloat()
+            }
+        }
+        return hist
+    }
+
 
     private fun grayValue(pixel: Int): Float {
         val r = Color.red(pixel)
@@ -255,7 +274,7 @@ class FaceRecognizer {
         }
     }
 
-    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.5f): Boolean {
+    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.58f): Boolean {
         return feature1.cosineSimilarity(feature2) > threshold
     }
 }
