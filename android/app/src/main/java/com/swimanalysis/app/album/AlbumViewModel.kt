@@ -26,6 +26,7 @@ data class AlbumUiState(
     val scannedCount: Int = 0,
     val albums: Map<String, PersonAlbum> = emptyMap(),
     val referenceUris: Map<String, List<Uri>> = emptyMap(),
+    val referenceFeatures: Map<String, List<FaceFeature>> = emptyMap(),
     val selectedPerson: String? = null,
     val error: String? = null
 )
@@ -50,7 +51,16 @@ class AlbumViewModel @Inject constructor(
             viewModelScope.launch {
                 albumStore.referencePaths(person).collect { paths ->
                     val uris = paths.map { Uri.fromFile(File(it)) }
-                    _state.update { it.copy(referenceUris = it.referenceUris + (person to uris)) }
+                    val features = paths.mapNotNull { p ->
+                        val featFile = featureFileOf(p)
+                        if (featFile.exists()) faceRecognizer.loadFeature(featFile) else null
+                    }
+                    _state.update {
+                        it.copy(
+                            referenceUris = it.referenceUris + (person to uris),
+                            referenceFeatures = it.referenceFeatures + (person to features)
+                        )
+                    }
                 }
             }
             viewModelScope.launch {
@@ -58,7 +68,7 @@ class AlbumViewModel @Inject constructor(
                     if (stored.isNotEmpty()) {
                         val photos = stored.map {
                             PersonPhoto(Uri.parse(it.uri), it.uri, it.dateTaken, it.dateText, it.location, it.size)
-                        }
+                        }.sortedByDescending { it.dateTaken }
                         _state.update { it.copy(albums = it.albums + (person to PersonAlbum(person, emptyList(), photos))) }
                     }
                 }
@@ -71,16 +81,30 @@ class AlbumViewModel @Inject constructor(
             try {
                 val destPath = withContext(Dispatchers.IO) {
                     val dir = File(context.filesDir, "refs/$personName").apply { mkdirs() }
-                    val dest = File(dir, "${System.currentTimeMillis()}.jpg")
+                    val timestamp = System.currentTimeMillis()
+                    val dest = File(dir, "$timestamp.jpg")
                     context.contentResolver.openInputStream(uri)?.use { ins ->
                         dest.outputStream().use { out -> ins.copyTo(out) }
                     }
                     dest.absolutePath
                 }
                 val newUri = Uri.fromFile(File(destPath))
+                val feature = faceRecognizer.extractFeature(context, newUri)
+                if (feature != null) {
+                    val featFile = featureFileOf(destPath)
+                    faceRecognizer.saveFeature(featFile, feature)
+                }
                 _state.update { current ->
-                    val existing = current.referenceUris[personName] ?: emptyList()
-                    current.copy(referenceUris = current.referenceUris + (personName to (existing + newUri)))
+                    val existingUris = current.referenceUris[personName] ?: emptyList()
+                    val existingFeatures = current.referenceFeatures[personName] ?: emptyList()
+                    current.copy(
+                        referenceUris = current.referenceUris + (personName to (existingUris + newUri)),
+                        referenceFeatures = if (feature != null) {
+                            current.referenceFeatures + (personName to (existingFeatures + feature))
+                        } else {
+                            current.referenceFeatures
+                        }
+                    )
                 }
                 val paths = (_state.value.referenceUris[personName] ?: emptyList()).mapNotNull { it.path }
                 albumStore.saveReferencePaths(personName, paths)
@@ -92,10 +116,25 @@ class AlbumViewModel @Inject constructor(
 
     fun removeReferencePhoto(personName: String, uri: Uri) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { runCatching { File(uri.path ?: "").delete() } }
+            withContext(Dispatchers.IO) {
+                val path = uri.path ?: return@withContext
+                runCatching { File(path).delete() }
+                runCatching { featureFileOf(path).delete() }
+            }
+            val removeIndex = (_state.value.referenceUris[personName] ?: emptyList()).indexOf(uri)
             _state.update { current ->
-                val existing = current.referenceUris[personName] ?: emptyList()
-                current.copy(referenceUris = current.referenceUris + (personName to (existing - uri)))
+                val existingUris = current.referenceUris[personName] ?: emptyList()
+                val existingFeatures = current.referenceFeatures[personName] ?: emptyList()
+                val newUris = existingUris - uri
+                val newFeatures = if (removeIndex in existingFeatures.indices) {
+                    existingFeatures.toMutableList().also { it.removeAt(removeIndex) }
+                } else {
+                    existingFeatures
+                }
+                current.copy(
+                    referenceUris = current.referenceUris + (personName to newUris),
+                    referenceFeatures = current.referenceFeatures + (personName to newFeatures)
+                )
             }
             val paths = (_state.value.referenceUris[personName] ?: emptyList()).mapNotNull { it.path }
             albumStore.saveReferencePaths(personName, paths)
@@ -107,16 +146,17 @@ class AlbumViewModel @Inject constructor(
     }
 
     fun startScan() {
-        val referenceUris = _state.value.referenceUris
-        val hasReferences = PERSONS.any { (referenceUris[it]?.size ?: 0) > 0 }
-        if (!hasReferences) {
+        val referenceFeatures = _state.value.referenceFeatures
+        val hasFeatures = PERSONS.any { (referenceFeatures[it]?.size ?: 0) > 0 }
+        if (!hasFeatures) {
             _state.update { it.copy(error = "请先为至少一个孩子添加参考照片") }
             return
         }
 
+        val currentReferenceUris = _state.value.referenceUris
         _state.update { it.copy(isScanning = true, error = null, scanMessage = "准备扫描...") }
         viewModelScope.launch {
-            photoScanner.scanAlbums(PERSONS, referenceUris).collect { scanState ->
+            photoScanner.scanAlbums(PERSONS, referenceFeatures).collect { scanState ->
                 _state.update {
                     AlbumUiState(
                         isScanning = scanState.status == ScanStatus.SCANNING,
@@ -125,7 +165,8 @@ class AlbumViewModel @Inject constructor(
                         totalCount = scanState.totalCount,
                         scannedCount = scanState.scannedCount,
                         albums = scanState.albums,
-                        referenceUris = referenceUris,
+                        referenceUris = currentReferenceUris,
+                        referenceFeatures = referenceFeatures,
                         selectedPerson = it.selectedPerson,
                         error = scanState.error
                     )
@@ -144,5 +185,10 @@ class AlbumViewModel @Inject constructor(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    private fun featureFileOf(photoPath: String): File {
+        val photoFile = File(photoPath)
+        return File(photoFile.parentFile, photoFile.nameWithoutExtension + ".feat")
     }
 }

@@ -49,22 +49,19 @@ class PhotoScanner(
 
     fun scanAlbums(
         personNames: List<String>,
-        referenceUris: Map<String, List<Uri>>
+        referenceFeatures: Map<String, List<FaceFeature>>
     ): Flow<ScanState> = flow {
         var state = ScanState(status = ScanStatus.SCANNING, totalCount = 0)
         emit(state)
 
         try {
-            val referenceFeatures = mutableMapOf<String, List<FaceFeature>>()
+            val fusedFeatures = mutableMapOf<String, FaceFeature?>()
             for (name in personNames) {
-                val uris = referenceUris[name] ?: emptyList()
-                val features = uris.mapNotNull { uri ->
-                    faceRecognizer.extractFeature(context, uri)
-                }
-                referenceFeatures[name] = features
+                val refs = referenceFeatures[name] ?: emptyList()
+                fusedFeatures[name] = faceRecognizer.averageFeatures(refs)
                 state = state.copy(
                     progress = 0.1f,
-                    currentPhoto = "已注册 $name 的 ${features.size} 张参考照片"
+                    currentPhoto = "已加载 $name 的 ${refs.size} 个参考特征"
                 )
                 emit(state)
             }
@@ -91,8 +88,10 @@ class PhotoScanner(
 
                 for (name in personNames) {
                     val refs = referenceFeatures[name] ?: continue
-                    val matched = refs.any { ref -> faceRecognizer.isMatch(ref, feature) }
-                    if (matched) {
+                    val fused = fusedFeatures[name]
+                    val matchedByFused = fused != null && faceRecognizer.isMatch(fused, feature)
+                    val matchedBySingle = refs.any { ref -> faceRecognizer.isStrictMatch(ref, feature) }
+                    if (matchedByFused || matchedBySingle) {
                         classifiedPhotos[name]!!.add(photo)
                         break
                     }

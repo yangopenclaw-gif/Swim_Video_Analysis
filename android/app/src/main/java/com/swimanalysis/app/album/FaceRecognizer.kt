@@ -3,14 +3,20 @@ package com.swimanalysis.app.album
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.PointF
 import android.media.ExifInterface
 import android.media.FaceDetector
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import kotlin.math.atan2
 import kotlin.math.sqrt
 
 data class FaceFeature(
@@ -29,13 +35,18 @@ data class FaceFeature(
         val denom = sqrt(normA) * sqrt(normB)
         return if (denom > 0) dot / denom else 0f
     }
+
+    override fun equals(other: Any?): Boolean = this === other
+    override fun hashCode(): Int = embedding.contentHashCode()
 }
 
 class FaceRecognizer {
 
     companion object {
-        private const val FACE_SIZE = 48
+        private const val FACE_SIZE = 64
         private const val MAX_IMAGE_DIM = 640
+        private const val MATCH_THRESHOLD = 0.55f
+        private const val STRICT_THRESHOLD = 0.62f
     }
 
     suspend fun extractFeature(context: Context, uri: Uri): FaceFeature? = withContext(Dispatchers.IO) {
@@ -79,6 +90,41 @@ class FaceRecognizer {
         }
     }
 
+    fun averageFeatures(features: List<FaceFeature>): FaceFeature? {
+        if (features.isEmpty()) return null
+        val size = features[0].embedding.size
+        val avg = FloatArray(size)
+        for (f in features) {
+            val e = f.embedding
+            for (i in 0 until size) avg[i] += e[i]
+        }
+        for (i in 0 until size) avg[i] /= features.size
+        val avgConf = features.map { it.confidence }.average().toFloat()
+        return FaceFeature(normalize(avg), avgConf)
+    }
+
+    fun saveFeature(file: File, feature: FaceFeature) {
+        DataOutputStream(file.outputStream()).use {
+            it.writeFloat(feature.confidence)
+            it.writeInt(feature.embedding.size)
+            for (v in feature.embedding) it.writeFloat(v)
+        }
+    }
+
+    fun loadFeature(file: File): FaceFeature? {
+        return try {
+            DataInputStream(file.inputStream()).use {
+                val confidence = it.readFloat()
+                val size = it.readInt()
+                if (size <= 0 || size > 100000) return null
+                val embedding = FloatArray(size) { it.readFloat() }
+                FaceFeature(embedding, confidence)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun scaleDownIfNeeded(bitmap: Bitmap): Bitmap {
         val maxDim = maxOf(bitmap.width, bitmap.height)
         if (maxDim <= MAX_IMAGE_DIM) return bitmap
@@ -94,28 +140,28 @@ class FaceRecognizer {
     private fun alignAndCropFace(bitmap: Bitmap, midPoint: PointF, eyeDist: Float): Bitmap? {
         if (eyeDist < 10f) return null
 
-        val faceWidth = eyeDist * 2.2f
-        val faceHeight = eyeDist * 2.8f
+        val leftEyeX = midPoint.x - eyeDist / 2f
+        val leftEyeY = midPoint.y
+        val standardEyeDist = FACE_SIZE * 0.4f
+        val scale = standardEyeDist / eyeDist
 
-        val srcLeft = (midPoint.x - faceWidth / 2).coerceAtLeast(0f).toInt()
-        val srcTop = (midPoint.y - faceHeight * 0.35f).coerceAtLeast(0f).toInt()
-        val srcRight = (midPoint.x + faceWidth / 2).coerceAtMost(bitmap.width.toFloat()).toInt()
-        val srcBottom = (midPoint.y + faceHeight * 0.65f).coerceAtMost(bitmap.height.toFloat()).toInt()
+        val matrix = Matrix()
+        matrix.postTranslate(-leftEyeX, -leftEyeY)
+        matrix.postScale(scale, scale)
+        matrix.postTranslate(FACE_SIZE * 0.3f, FACE_SIZE * 0.4f)
 
-        val w = srcRight - srcLeft
-        val h = srcBottom - srcTop
-        if (w < 20 || h < 20) return null
-
-        val cropped = Bitmap.createBitmap(bitmap, srcLeft, srcTop, w, h)
-        val resized = Bitmap.createScaledBitmap(cropped, FACE_SIZE, FACE_SIZE, true)
-        if (cropped !== resized) cropped.recycle()
-        return resized
+        val aligned = Bitmap.createBitmap(FACE_SIZE, FACE_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(aligned)
+        canvas.drawColor(Color.BLACK)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(bitmap, matrix, paint)
+        return aligned
     }
 
     private fun centerCrop(bitmap: Bitmap): Bitmap? {
         val w = bitmap.width
         val h = bitmap.height
-        val size = minOf(w, h) * 60 / 100
+        val size = minOf(w, h) * 70 / 100
         if (size < 20) return null
         val left = (w - size) / 2
         val top = (h - size) / 2
@@ -135,10 +181,13 @@ class FaceRecognizer {
         val lbp = computeLBPImage(equalized)
         val lbph = computeLBPH(lbp)
         val grayHist = computeGrayBlockHist(equalized)
+        val hog = computeHOG(equalized)
 
-        val embedding = FloatArray(lbph.size + grayHist.size)
-        for (i in lbph.indices) embedding[i] = lbph[i]
-        for (i in grayHist.indices) embedding[lbph.size + i] = grayHist[i] * 0.3f
+        val embedding = FloatArray(lbph.size + grayHist.size + hog.size)
+        var idx = 0
+        for (v in lbph) embedding[idx++] = v
+        for (v in grayHist) embedding[idx++] = v * 0.3f
+        for (v in hog) embedding[idx++] = v * 0.5f
         return normalize(embedding)
     }
 
@@ -223,6 +272,45 @@ class FaceRecognizer {
         return hist
     }
 
+    private fun computeHOG(gray: IntArray): FloatArray {
+        val w = FACE_SIZE
+        val h = FACE_SIZE
+        val bins = 9
+        val blocks = 4
+        val blockW = w / blocks
+        val blockH = h / blocks
+        val hist = FloatArray(blocks * blocks * bins)
+
+        val magnitude = FloatArray(w * h)
+        val orientation = FloatArray(w * h)
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val gx = (gray[y * w + (x + 1)] - gray[y * w + (x - 1)]).toFloat()
+                val gy = (gray[(y + 1) * w + x] - gray[(y - 1) * w + x]).toFloat()
+                magnitude[y * w + x] = sqrt(gx * gx + gy * gy)
+                var angle = atan2(gy, gx) * 180f / Math.PI.toFloat()
+                if (angle < 0) angle += 180f
+                orientation[y * w + x] = angle
+            }
+        }
+
+        for (by in 0 until blocks) {
+            for (bx in 0 until blocks) {
+                val offset = (by * blocks + bx) * bins
+                for (y in by * blockH until (by + 1) * blockH) {
+                    for (x in bx * blockW until (bx + 1) * blockW) {
+                        val bin = (orientation[y * w + x] / 180f * bins).toInt().coerceIn(0, bins - 1)
+                        hist[offset + bin] += magnitude[y * w + x]
+                    }
+                }
+                var sum = 0f
+                for (i in 0 until bins) sum += hist[offset + i] * hist[offset + i]
+                sum = sqrt(sum)
+                if (sum > 0) for (i in 0 until bins) hist[offset + i] /= sum
+            }
+        }
+        return hist
+    }
 
     private fun grayValue(pixel: Int): Float {
         val r = Color.red(pixel)
@@ -274,7 +362,11 @@ class FaceRecognizer {
         }
     }
 
-    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = 0.58f): Boolean {
+    fun isMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = MATCH_THRESHOLD): Boolean {
+        return feature1.cosineSimilarity(feature2) > threshold
+    }
+
+    fun isStrictMatch(feature1: FaceFeature, feature2: FaceFeature, threshold: Float = STRICT_THRESHOLD): Boolean {
         return feature1.cosineSimilarity(feature2) > threshold
     }
 }
