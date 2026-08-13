@@ -98,7 +98,8 @@ class FaceRecognizer {
             val e = f.embedding
             for (i in 0 until size) avg[i] += e[i]
         }
-        for (i in 0 until size) avg[i] /= features.size
+        val count = features.size.toFloat()
+        for (i in 0 until size) avg[i] = avg[i] / count
         val avgConf = features.map { it.confidence }.average().toFloat()
         return FaceFeature(normalize(avg), avgConf)
     }
@@ -113,11 +114,11 @@ class FaceRecognizer {
 
     fun loadFeature(file: File): FaceFeature? {
         return try {
-            DataInputStream(file.inputStream()).use {
-                val confidence = it.readFloat()
-                val size = it.readInt()
+            DataInputStream(file.inputStream()).use { dis ->
+                val confidence = dis.readFloat()
+                val size = dis.readInt()
                 if (size <= 0 || size > 100000) return null
-                val embedding = FloatArray(size) { it.readFloat() }
+                val embedding = FloatArray(size) { dis.readFloat() }
                 FaceFeature(embedding, confidence)
             }
         } catch (e: Exception) {
