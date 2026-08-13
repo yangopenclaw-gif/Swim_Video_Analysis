@@ -118,7 +118,7 @@ class UpdateChecker @Inject constructor() {
                 fileSize = obj["size"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
             }
 
-            val hasUpdate = versionCode > BuildConfig.VERSION_CODE
+            val hasUpdate = versionCode > parseVersionCode(BuildConfig.VERSION_NAME)
 
             UpdateInfo(
                 latestVersion = versionName,
