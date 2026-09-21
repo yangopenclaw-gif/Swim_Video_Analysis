@@ -19,7 +19,7 @@ import java.time.YearMonth
 import javax.inject.Inject
 
 object LedgerCategories {
-    val EXPENSE = listOf("自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "其他")
+    val EXPENSE = listOf("自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "AI", "云机", "其他")
     val INCOME = listOf("工资", "奖金", "理财", "红包", "其他")
 }
 
