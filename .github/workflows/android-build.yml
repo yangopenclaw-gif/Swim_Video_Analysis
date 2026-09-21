@@ -74,16 +74,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: 泳娃分析 v${{ steps.version.outputs.version }}
+          name: 记账本 v${{ steps.version.outputs.version }}
           body: |
-            ## 泳娃分析 v${{ steps.version.outputs.version }}
+            ## 记账本 v${{ steps.version.outputs.version }}
 
             ### 下载安装
             - 下载下方 `app-debug.apk` 直接安装
             - 或下载 `app-release.apk`（更小体积）
 
             ### 更新方式
-            已安装旧版本的用户可在应用内「设置 → 检查更新」自动升级
+            已安装旧版本的用户可在应用内「我的 → 检查更新」自动升级
           files: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/release/app-release.apk

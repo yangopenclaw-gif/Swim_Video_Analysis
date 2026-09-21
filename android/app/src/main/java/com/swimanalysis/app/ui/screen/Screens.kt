@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +58,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.swimanalysis.app.BuildConfig
+import com.swimanalysis.app.update.UpdateDialog
 import com.swimanalysis.app.media.VideoPicker
 import com.swimanalysis.app.ui.navigation.Screen
 
@@ -653,7 +655,12 @@ fun VideosScreen(navController: NavController, viewModel: VideosViewModel = hilt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(navController: NavController) {
+fun ProfileScreen(
+    navController: NavController,
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
+    val state by viewModel.state.collectAsState()
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("我的") }) }
     ) { padding ->
@@ -664,17 +671,78 @@ fun ProfileScreen(navController: NavController) {
                 .padding(16.dp)
         ) {
             Text("个人中心", style = MaterialTheme.typography.titleLarge)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "个人记账本 v${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "支持按月/按年统计收支、语音记账",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("版本更新", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("当前版本", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("v${BuildConfig.VERSION_NAME}")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.checkUpdate() },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.isCheckingUpdate
+                    ) {
+                        if (state.isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 8.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                        }
+                        Text(if (state.isCheckingUpdate) "检查中..." else "检查更新")
+                    }
+                    state.updateError?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "检查失败: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    state.updateInfo?.let { info ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (info.hasUpdate) "发现新版本 v${info.latestVersion}" else "已是最新版本",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (info.hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    state.updateInfo?.let { info ->
+        if (info.hasUpdate) {
+            UpdateDialog(
+                updateInfo = info,
+                onDismiss = { viewModel.clearUpdateInfo() }
             )
         }
     }
