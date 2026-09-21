@@ -64,5 +64,13 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch { authStore.clear() }
     }
 
+    fun lock() {
+        authStore.lock()
+    }
+
+    fun unlock() {
+        authStore.unlock()
+    }
+
     fun clearError() = _state.update { it.copy(error = null) }
 }

@@ -55,6 +55,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
+import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.ui.theme.ExpenseRed
 import com.swimanalysis.app.ui.theme.IncomeGreen
@@ -270,16 +271,27 @@ private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () ->
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                entry.createdAt?.let {
+                    Text(
+                        "录入于 $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
-                val currencyLabel = if (entry.currency == "CNY") "" else " ${LedgerCurrencies.name(entry.currency)}"
-                Text(
-                    "${if (isExpense) "-" else "+"}${formatAmount(entry.amount)}$currencyLabel",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = amountColor
-                )
-                if (entry.currency != "CNY") {
+                val items = if (entry.amounts.isNotEmpty()) entry.amounts
+                else listOf(AmountItemDto(entry.currency, entry.amount, entry.amountCny))
+                items.forEachIndexed { i, item ->
+                    val unit = if (item.currency == "CNY") "元" else LedgerCurrencies.name(item.currency)
+                    Text(
+                        "${if (isExpense) "-" else "+"}${formatAmount(item.amount)} $unit",
+                        style = if (i == 0) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal,
+                        color = amountColor
+                    )
+                }
+                if (items.size > 1 || items.firstOrNull()?.currency != "CNY") {
                     Text(
                         "≈¥${formatAmount(entry.amountCny)}",
                         style = MaterialTheme.typography.bodySmall,

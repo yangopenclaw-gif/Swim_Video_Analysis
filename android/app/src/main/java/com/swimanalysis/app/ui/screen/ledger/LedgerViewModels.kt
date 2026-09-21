@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui.screen.ledger
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.data.model.LedgerSummary
 import com.swimanalysis.app.data.model.UpdateLedgerEntryRequest
@@ -154,13 +155,17 @@ class StatsViewModel @Inject constructor(
     }
 }
 
+data class AmountLine(
+    val currency: String = "CNY",
+    val amountText: String = ""
+)
+
 data class AddEntryUiState(
     val entryType: String = "expense",
-    val amountText: String = "",
+    val amountLines: List<AmountLine> = listOf(AmountLine()),
     val category: String = "其他",
     val note: String = "",
     val entryDate: String = LocalDate.now().toString(),
-    val currency: String = "CNY",
     val isEdit: Boolean = false,
     val isParsing: Boolean = false,
     val parseError: String? = null,
@@ -183,29 +188,49 @@ class AddEntryViewModel @Inject constructor(
     }
 
     fun setEntryType(type: String) {
-        val category = if (type == "expense") "其他" else "其他"
-        _state.update { it.copy(entryType = type, category = category) }
+        _state.update { it.copy(entryType = type) }
     }
 
-    fun setAmount(text: String) = _state.update { it.copy(amountText = text) }
     fun setCategory(category: String) = _state.update { it.copy(category = category) }
     fun setNote(text: String) = _state.update { it.copy(note = text) }
     fun setDate(text: String) = _state.update { it.copy(entryDate = text) }
-    fun setCurrency(code: String) = _state.update { it.copy(currency = code) }
+
+    fun setLineAmount(index: Int, text: String) = _state.update { state ->
+        val lines = state.amountLines.toMutableList()
+        if (index in lines.indices) lines[index] = lines[index].copy(amountText = text)
+        state.copy(amountLines = lines)
+    }
+
+    fun setLineCurrency(index: Int, code: String) = _state.update { state ->
+        val lines = state.amountLines.toMutableList()
+        if (index in lines.indices) lines[index] = lines[index].copy(currency = code)
+        state.copy(amountLines = lines)
+    }
+
+    fun addLine() = _state.update { it.copy(amountLines = it.amountLines + AmountLine()) }
+
+    fun removeLine(index: Int) = _state.update { state ->
+        if (state.amountLines.size <= 1) state
+        else state.copy(amountLines = state.amountLines.filterIndexed { i, _ -> i != index })
+    }
 
     private fun loadEntry(id: String) {
         viewModelScope.launch {
             try {
                 val entry = repository.getEntries(null, null).find { it.id == id }
                 if (entry != null) {
+                    val lines = if (entry.amounts.isNotEmpty()) {
+                        entry.amounts.map { AmountLine(it.currency.ifBlank { "CNY" }, formatAmount(it.amount)) }
+                    } else {
+                        listOf(AmountLine(entry.currency.ifBlank { "CNY" }, formatAmount(entry.amount)))
+                    }
                     _state.update {
                         it.copy(
                             entryType = entry.entryType,
-                            amountText = formatAmount(entry.amount),
+                            amountLines = lines,
                             category = entry.category,
                             note = entry.note,
-                            entryDate = entry.entryDate,
-                            currency = entry.currency.ifBlank { "CNY" }
+                            entryDate = entry.entryDate
                         )
                     }
                 }
@@ -222,15 +247,21 @@ class AddEntryViewModel @Inject constructor(
             try {
                 val result = repository.parseVoice(text)
                 val data = result.data
-                val amount = data.amount
-                if (amount <= 0) {
+                val lines = if (data.amounts.isNotEmpty()) {
+                    data.amounts.map { AmountLine(it.currency.ifBlank { "CNY" }, formatAmount(it.amount)) }
+                } else if (data.amount > 0) {
+                    listOf(AmountLine(data.currency.ifBlank { "CNY" }, formatAmount(data.amount)))
+                } else {
+                    emptyList()
+                }
+                if (lines.isEmpty()) {
                     _state.update { it.copy(isParsing = false, parseError = "未识别出金额") }
                 } else {
                     _state.update {
                         it.copy(
                             isParsing = false,
                             entryType = if (data.type == "income") "income" else "expense",
-                            amountText = formatAmount(amount),
+                            amountLines = lines,
                             category = data.category.ifBlank { "其他" },
                             note = data.note,
                             entryDate = data.date.ifBlank { LocalDate.now().toString() }
@@ -244,8 +275,11 @@ class AddEntryViewModel @Inject constructor(
     }
 
     fun submit() {
-        val amount = _state.value.amountText.toDoubleOrNull()
-        if (amount == null || amount <= 0) {
+        val items = _state.value.amountLines.mapNotNull { line ->
+            val amt = line.amountText.toDoubleOrNull()
+            if (amt == null || amt <= 0) null else AmountItemDto(line.currency, amt)
+        }
+        if (items.isEmpty()) {
             _state.update { it.copy(error = "请输入有效金额") }
             return
         }
@@ -258,15 +292,19 @@ class AddEntryViewModel @Inject constructor(
                         entryId,
                         UpdateLedgerEntryRequest(
                             entryType = s.entryType,
-                            amount = amount,
+                            amount = items.first().amount,
                             category = s.category,
                             note = s.note,
                             entryDate = s.entryDate,
-                            currency = s.currency
+                            currency = items.first().currency,
+                            amounts = items
                         )
                     )
                 } else {
-                    repository.createEntry(s.entryType, amount, s.category, s.note, s.entryDate, s.currency)
+                    repository.createEntry(
+                        s.entryType, items.first().amount, s.category, s.note,
+                        s.entryDate, items.first().currency, items
+                    )
                 }
                 _state.update { it.copy(submitting = false, submitSuccess = true) }
             } catch (e: Exception) {

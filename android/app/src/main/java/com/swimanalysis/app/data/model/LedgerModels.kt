@@ -4,6 +4,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class AmountItemDto(
+    val currency: String = "CNY",
+    val amount: Double = 0.0,
+    @SerialName("amount_cny") val amountCny: Double = 0.0
+)
+
+@Serializable
 data class LedgerEntryDto(
     val id: String = "",
     @SerialName("entry_type") val entryType: String = "expense",
@@ -13,6 +20,7 @@ data class LedgerEntryDto(
     @SerialName("entry_date") val entryDate: String = "",
     val currency: String = "CNY",
     @SerialName("amount_cny") val amountCny: Double = 0.0,
+    val amounts: List<AmountItemDto> = emptyList(),
     @SerialName("created_at") val createdAt: String? = null
 )
 
@@ -37,7 +45,8 @@ data class CreateLedgerEntryRequest(
     val category: String,
     val note: String = "",
     @SerialName("entry_date") val entryDate: String,
-    val currency: String = "CNY"
+    val currency: String = "CNY",
+    val amounts: List<AmountItemDto>? = null
 )
 
 @Serializable
@@ -47,7 +56,8 @@ data class UpdateLedgerEntryRequest(
     val category: String? = null,
     val note: String? = null,
     @SerialName("entry_date") val entryDate: String? = null,
-    val currency: String? = null
+    val currency: String? = null,
+    val amounts: List<AmountItemDto>? = null
 )
 
 @Serializable
@@ -84,9 +94,11 @@ data class ParseVoiceRequest(
 data class VoiceParseData(
     val type: String = "expense",
     val amount: Double = 0.0,
+    val currency: String = "CNY",
     val category: String = "其他",
     val note: String = "",
-    val date: String = ""
+    val date: String = "",
+    val amounts: List<AmountItemDto> = emptyList()
 )
 @Serializable
 data class ParseVoiceResponse(

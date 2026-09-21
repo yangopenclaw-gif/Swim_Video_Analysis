@@ -14,8 +14,8 @@ android {
         applicationId = "com.swimanalysis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "2.1.1"
+        versionCode = 24
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -128,6 +128,7 @@ dependencies {
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    implementation("androidx.biometric:biometric:1.1.0")
 
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 

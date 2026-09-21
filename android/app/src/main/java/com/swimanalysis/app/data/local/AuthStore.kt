@@ -34,6 +34,9 @@ class AuthStore @Inject constructor(
     private val _username = MutableStateFlow<String?>(null)
     val username: StateFlow<String?> = _username.asStateFlow()
 
+    private val _locked = MutableStateFlow(false)
+    val locked: StateFlow<Boolean> = _locked.asStateFlow()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -42,10 +45,19 @@ class AuthStore @Inject constructor(
             cachedToken = prefs[KEY_TOKEN]
             _username.value = prefs[KEY_USERNAME]
             _isLoggedIn.value = cachedToken != null
+            _locked.value = cachedToken != null
         }
     }
 
     fun currentToken(): String? = cachedToken
+
+    fun lock() {
+        _locked.value = true
+    }
+
+    fun unlock() {
+        _locked.value = false
+    }
 
     suspend fun save(token: String, name: String) {
         context.authDataStore.edit {
@@ -55,6 +67,7 @@ class AuthStore @Inject constructor(
         cachedToken = token
         _username.value = name
         _isLoggedIn.value = true
+        _locked.value = false
     }
 
     suspend fun clear() {
@@ -65,5 +78,6 @@ class AuthStore @Inject constructor(
         cachedToken = null
         _username.value = null
         _isLoggedIn.value = false
+        _locked.value = false
     }
 }

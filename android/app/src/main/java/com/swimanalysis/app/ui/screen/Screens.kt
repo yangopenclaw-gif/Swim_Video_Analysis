@@ -747,10 +747,10 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
             OutlinedButton(
-                onClick = { authViewModel.logout() },
+                onClick = { authViewModel.lock() },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("退出登录", color = MaterialTheme.colorScheme.error)
+                Text("锁定")
             }
         }
     }

@@ -21,7 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -116,27 +118,46 @@ fun AddEntryScreen(
                 )
             }
 
-            OutlinedTextField(
-                value = state.amountText,
-                onValueChange = viewModel::setAmount,
-                label = { Text("金额") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Text("币种", style = MaterialTheme.typography.labelLarge)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                LedgerCurrencies.LIST.forEach { (code, name) ->
-                    FilterChip(
-                        selected = state.currency == code,
-                        onClick = { viewModel.setCurrency(code) },
-                        label = { Text(name) }
-                    )
+            Text("金额（可多币种）", style = MaterialTheme.typography.labelLarge)
+            state.amountLines.forEachIndexed { index, line ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = line.amountText,
+                            onValueChange = { viewModel.setLineAmount(index, it) },
+                            label = { Text("金额") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (state.amountLines.size > 1) {
+                            Spacer(Modifier.width(4.dp))
+                            IconButton(onClick = { viewModel.removeLine(index) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "删除该币种")
+                            }
+                        }
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        LedgerCurrencies.LIST.forEach { (code, name) ->
+                            FilterChip(
+                                selected = line.currency == code,
+                                onClick = { viewModel.setLineCurrency(index, code) },
+                                label = { Text(name) }
+                            )
+                        }
+                    }
                 }
+            }
+            OutlinedButton(
+                onClick = viewModel::addLine,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("添加币种")
             }
 
             val categories = if (state.entryType == "expense") {

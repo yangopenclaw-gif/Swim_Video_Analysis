@@ -123,9 +123,10 @@ class LedgerEntry(Base):
     category = Column(String, nullable=False)
     note = Column(String, nullable=True)
     entry_date = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     currency = Column(String, default="CNY")
     amount_cny = Column(Float, default=0.0)
+    amounts = Column(Text, nullable=True)
     user_id = Column(String, nullable=True, index=True)
 
 
@@ -221,12 +222,36 @@ def _migrate_ledger_columns():
             cur.execute("ALTER TABLE ledger_entries ADD COLUMN amount_cny FLOAT DEFAULT 0.0")
         if "user_id" not in cols:
             cur.execute("ALTER TABLE ledger_entries ADD COLUMN user_id VARCHAR")
+        if "amounts" not in cols:
+            cur.execute("ALTER TABLE ledger_entries ADD COLUMN amounts TEXT")
         conn.commit()
     finally:
         conn.close()
 
 
 _migrate_ledger_columns()
+
+
+def _fix_created_at_timezone():
+    import sqlite3
+    conn = engine.raw_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        cur.execute("SELECT value FROM meta WHERE key='created_at_tz_fixed'")
+        if cur.fetchone():
+            return
+        cur.execute(
+            "UPDATE ledger_entries SET created_at = datetime(created_at, '+8 hours') "
+            "WHERE created_at IS NOT NULL"
+        )
+        cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('created_at_tz_fixed', '1')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_fix_created_at_timezone()
 
 EXCHANGE_RATES = {}
 
@@ -261,6 +286,24 @@ def _backfill_ledger_amount_cny():
 
 
 _backfill_ledger_amount_cny()
+
+
+def _backfill_ledger_amounts():
+    dbs = SessionLocal()
+    try:
+        for e in dbs.query(LedgerEntry).filter(LedgerEntry.amounts == None).all():
+            cur = e.currency or "CNY"
+            acny = e.amount_cny if e.amount_cny else round(e.amount * EXCHANGE_RATES.get(cur, 1.0), 2)
+            e.amounts = json.dumps(
+                [{"currency": cur, "amount": e.amount, "amount_cny": round(acny, 2)}],
+                ensure_ascii=False
+            )
+        dbs.commit()
+    finally:
+        dbs.close()
+
+
+_backfill_ledger_amounts()
 
 db = SessionLocal()
 try:
@@ -1928,30 +1971,79 @@ async def compare_evaluate(request: Request):
         return {"evaluation": f"AI评价请求失败: {str(e)}"}
 
 
+def _normalize_amount_items(raw_amounts) -> list:
+    """把 [{'currency':..., 'amount':...}] 规范化为带 amount_cny 的列表，过滤非法项"""
+    items = []
+    for a in (raw_amounts or []):
+        if not isinstance(a, dict):
+            continue
+        cur = str(a.get("currency") or "CNY").upper()
+        if cur not in CURRENCIES:
+            cur = "CNY"
+        try:
+            amt = float(a.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        rate = EXCHANGE_RATES.get(cur, 1.0)
+        items.append({"currency": cur, "amount": amt, "amount_cny": round(amt * rate, 2)})
+    return items
+
+
+def _parse_entry_amounts(body: dict):
+    """解析请求体中的多币种金额，返回 (items, currency, amount, amount_cny, amounts_json) 或 None"""
+    items = _normalize_amount_items(body.get("amounts"))
+    if not items:
+        try:
+            amt = float(body.get("amount", 0))
+        except (TypeError, ValueError):
+            amt = 0.0
+        if amt <= 0:
+            return None
+        cur = str(body.get("currency") or "CNY").upper()
+        if cur not in CURRENCIES:
+            cur = "CNY"
+        rate = EXCHANGE_RATES.get(cur, 1.0)
+        items = [{"currency": cur, "amount": amt, "amount_cny": round(amt * rate, 2)}]
+    amount_cny = round(sum(i["amount_cny"] for i in items), 2)
+    currency = items[0]["currency"]
+    amount = items[0]["amount"]
+    amounts_json = json.dumps(items, ensure_ascii=False)
+    return items, currency, amount, amount_cny, amounts_json
+
+
+def _load_amounts(raw) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 @app.post("/api/ledger/entries")
 async def create_ledger_entry(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
     entry_type = body.get("entry_type", "expense")
     if entry_type not in ("expense", "income"):
         raise HTTPException(status_code=400, detail="entry_type 必须为 expense 或 income")
-    amount = float(body.get("amount", 0))
-    if amount <= 0:
+    parsed = _parse_entry_amounts(body)
+    if not parsed:
         raise HTTPException(status_code=400, detail="金额必须大于0")
+    items, currency, amount, amount_cny, amounts_json = parsed
     category = body.get("category", "其他")
     note = body.get("note", "")
     entry_date = body.get("entry_date", datetime.now().strftime("%Y-%m-%d"))
-    currency = (body.get("currency") or "CNY").upper()
-    if currency not in CURRENCIES:
-        currency = "CNY"
-    rate = EXCHANGE_RATES.get(currency, 1.0)
-    amount_cny = round(amount * rate, 2)
     entry_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         db.add(LedgerEntry(
             id=entry_id, entry_type=entry_type, amount=amount,
             category=category, note=note or None, entry_date=entry_date,
-            currency=currency, amount_cny=amount_cny, user_id=user_id
+            currency=currency, amount_cny=amount_cny, amounts=amounts_json,
+            user_id=user_id
         ))
         db.commit()
         return {"status": "ok", "id": entry_id}
@@ -1977,6 +2069,7 @@ async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] =
                 "entry_date": e.entry_date,
                 "currency": e.currency or "CNY",
                 "amount_cny": round(e.amount_cny or 0.0, 2),
+                "amounts": _load_amounts(e.amounts),
                 "created_at": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else None
             }
             for e in entries
@@ -2003,12 +2096,28 @@ async def update_ledger_entry(entry_id: str, request: Request, user_id: str = De
             entry.note = body["note"]
         if "entry_date" in body:
             entry.entry_date = body["entry_date"]
-        if "currency" in body:
-            cur = str(body["currency"]).upper()
-            if cur in CURRENCIES:
-                entry.currency = cur
-        rate = EXCHANGE_RATES.get(entry.currency or "CNY", 1.0)
-        entry.amount_cny = round(entry.amount * rate, 2)
+        if "amounts" in body:
+            parsed = _parse_entry_amounts(body)
+            if parsed:
+                items, currency, amount, amount_cny, amounts_json = parsed
+                entry.currency = currency
+                entry.amount = amount
+                entry.amount_cny = amount_cny
+                entry.amounts = amounts_json
+        else:
+            if "amount" in body:
+                entry.amount = float(body["amount"])
+            if "currency" in body:
+                cur = str(body["currency"]).upper()
+                if cur in CURRENCIES:
+                    entry.currency = cur
+            rate = EXCHANGE_RATES.get(entry.currency or "CNY", 1.0)
+            entry.amount_cny = round(entry.amount * rate, 2)
+            entry.amounts = json.dumps(
+                [{"currency": entry.currency or "CNY", "amount": entry.amount,
+                  "amount_cny": round(entry.amount_cny, 2)}],
+                ensure_ascii=False
+            )
         db.commit()
         return {"status": "ok"}
     finally:
@@ -2082,16 +2191,19 @@ async def parse_voice(request: Request, user_id: str = Depends(get_current_user_
         prompt = f"""你是个人记账助手，请把用户的口语化描述解析成一条记账记录。
 可选支出分类：{"/".join(LEDGER_CATEGORIES["expense"])}
 可选收入分类：{"/".join(LEDGER_CATEGORIES["income"])}
+可选币种代码：CNY(人民币/元/块)、USD(美元/美金)、EUR(欧元)、GBP(英镑)、EGP(埃镑)、HKD(港币)、JPY(日元)
 规则：
 1. type：支出为"expense"，收入为"income"（如"工资"、"赚了"、"收入"、"奖金"、"到账"等属于收入）
-2. amount：提取金额数字（单位元），只返回数字，如"一百块"转为100
-3. category：从上面分类中选择最匹配的一个，支出若无法判断选"其他"
-4. note：一句话简要备注（可选，可为空字符串）
-5. date：日期 YYYY-MM-DD，若用户没说明日期则用今天 {today}
+2. amounts：金额列表，支持多币种，每项格式 {{"currency":"币种代码","amount":数字}}。金额按币种原币记录，"一百块"转100。用户没说明币种时默认CNY。例如"700人民币加上300埃镑"应返回 [{{"currency":"CNY","amount":700}},{{"currency":"EGP","amount":300}}]
+3. amount：amounts 第一项的金额数字
+4. currency：amounts 第一项的币种代码
+5. category：从上面分类中选择最匹配的一个，支出若无法判断选"其他"
+6. note：一句话简要备注（可选，可为空字符串）
+7. date：日期 YYYY-MM-DD，若用户没说明日期则用今天 {today}
 
 用户说：{text}
 
-只返回JSON，格式：{{"type":"expense","amount":100,"category":"餐饮","note":"午饭","date":"{today}"}}"""
+只返回JSON，格式：{{"type":"expense","amount":100,"currency":"CNY","amounts":[{{"currency":"CNY","amount":100}}],"category":"餐饮","note":"午饭","date":"{today}"}}"""
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
@@ -2110,10 +2222,29 @@ async def parse_voice(request: Request, user_id: str = Depends(get_current_user_
                     result["type"] = result.get("type", "expense")
                     if result["type"] not in ("expense", "income"):
                         result["type"] = "expense"
-                    result.setdefault("amount", 0)
                     result.setdefault("category", "其他")
                     result.setdefault("note", "")
                     result.setdefault("date", today)
+                    items = _normalize_amount_items(result.get("amounts"))
+                    if items:
+                        result["amounts"] = items
+                        result["amount"] = items[0]["amount"]
+                        result["currency"] = items[0]["currency"]
+                    else:
+                        try:
+                            amt = float(result.get("amount", 0) or 0)
+                        except (TypeError, ValueError):
+                            amt = 0.0
+                        cur = str(result.get("currency") or "CNY").upper()
+                        if cur not in CURRENCIES:
+                            cur = "CNY"
+                        result["amount"] = amt
+                        result["currency"] = cur
+                        result["amounts"] = (
+                            [{"currency": cur, "amount": amt,
+                              "amount_cny": round(amt * EXCHANGE_RATES.get(cur, 1.0), 2)}]
+                            if amt > 0 else []
+                        )
                     return {"status": "ok", "data": result}
         except Exception as e:
             logger.error(f"Voice parse error: {e}")
@@ -2123,20 +2254,63 @@ async def parse_voice(request: Request, user_id: str = Depends(get_current_user_
 
 def basic_parse_voice(text: str, today: str):
     import re
-    lower = text.lower()
     entry_type = "expense"
     for kw in ["工资", "奖金", "收入", "赚", "到账", "红包", "理财", "进账", "发了"]:
         if kw in text:
             entry_type = "income"
             break
-    m = re.search(r'(\d+(?:\.\d+)?)', text)
-    amount = float(m.group(1)) if m else 0.0
     category = "其他"
     for cat in LEDGER_CATEGORIES["expense"] + LEDGER_CATEGORIES["income"]:
         if cat in text:
             category = cat
             break
-    return {"type": entry_type, "amount": amount, "category": category, "note": text, "date": today}
+
+    kw_map = [
+        ("CNY", ["人民币", "元", "块", "rmb", "cny"]),
+        ("USD", ["美元", "美金", "美刀", "usd"]),
+        ("EUR", ["欧元", "eur"]),
+        ("GBP", ["英镑", "gbp"]),
+        ("EGP", ["埃镑", "egp"]),
+        ("HKD", ["港币", "港元", "hkd"]),
+        ("JPY", ["日元", "日币", "jpy"]),
+    ]
+
+    def currency_after(pos):
+        best = None
+        best_pos = None
+        for code, kws in kw_map:
+            for kw in kws:
+                idx = text.find(kw, pos)
+                if idx == -1:
+                    continue
+                if best_pos is None or idx < best_pos:
+                    best_pos = idx
+                    best = code
+        return best
+
+    amounts = []
+    for m in re.finditer(r'(\d+(?:\.\d+)?)', text):
+        amt = float(m.group(1))
+        if amt <= 0:
+            continue
+        code = currency_after(m.end()) or "CNY"
+        merged = False
+        for item in amounts:
+            if item["currency"] == code:
+                item["amount"] = round(item["amount"] + amt, 2)
+                merged = True
+                break
+        if not merged:
+            amounts.append({"currency": code, "amount": amt})
+
+    for item in amounts:
+        item["amount_cny"] = round(item["amount"] * EXCHANGE_RATES.get(item["currency"], 1.0), 2)
+
+    if not amounts:
+        return {"type": entry_type, "amount": 0.0, "currency": "CNY", "amounts": [],
+                "category": category, "note": text, "date": today}
+    return {"type": entry_type, "amount": amounts[0]["amount"], "currency": amounts[0]["currency"],
+            "amounts": amounts, "category": category, "note": text, "date": today}
 
 
 @app.post("/api/auth/register")

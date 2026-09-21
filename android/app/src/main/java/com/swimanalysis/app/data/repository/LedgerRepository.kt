@@ -1,6 +1,7 @@
 package com.swimanalysis.app.data.repository
 
 import com.swimanalysis.app.data.api.LedgerApi
+import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.AuthRequest
 import com.swimanalysis.app.data.model.AuthResponse
 import com.swimanalysis.app.data.model.CreateLedgerEntryRequest
@@ -17,8 +18,17 @@ import javax.inject.Singleton
 class LedgerRepository @Inject constructor(
     private val api: LedgerApi
 ) {
-    suspend fun createEntry(entryType: String, amount: Double, category: String, note: String, entryDate: String, currency: String) =
-        api.createEntry(CreateLedgerEntryRequest(entryType, amount, category, note, entryDate, currency))
+    suspend fun createEntry(
+        entryType: String,
+        amount: Double,
+        category: String,
+        note: String,
+        entryDate: String,
+        currency: String,
+        amounts: List<AmountItemDto> = emptyList()
+    ) = api.createEntry(
+        CreateLedgerEntryRequest(entryType, amount, category, note, entryDate, currency, amounts.ifEmpty { null })
+    )
 
     suspend fun register(username: String, password: String): AuthResponse =
         api.register(AuthRequest(username, password))
