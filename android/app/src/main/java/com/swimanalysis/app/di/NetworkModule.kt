@@ -1,6 +1,7 @@
 package com.swimanalysis.app.di
 
 import com.swimanalysis.app.BuildConfig
+import com.swimanalysis.app.data.api.LedgerApi
 import com.swimanalysis.app.data.api.SwimApi
 import dagger.Module
 import dagger.Provides
@@ -66,4 +67,8 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideSwimApi(retrofit: Retrofit): SwimApi = retrofit.create(SwimApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideLedgerApi(retrofit: Retrofit): LedgerApi = retrofit.create(LedgerApi::class.java)
 }

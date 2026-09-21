@@ -113,6 +113,23 @@ class SwimmerProfile(Base):
     avatar_url = Column(String, nullable=True)
 
 
+class LedgerEntry(Base):
+    __tablename__ = "ledger_entries"
+    id = Column(String, primary_key=True)
+    entry_type = Column(String, nullable=False)
+    amount = Column(Float, nullable=False)
+    category = Column(String, nullable=False)
+    note = Column(String, nullable=True)
+    entry_date = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+LEDGER_CATEGORIES = {
+    "expense": ["自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "其他"],
+    "income": ["工资", "奖金", "理财", "红包", "其他"]
+}
+
+
 Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
@@ -1779,6 +1796,202 @@ async def compare_evaluate(request: Request):
             return {"evaluation": "AI评价暂时不可用"}
     except Exception as e:
         return {"evaluation": f"AI评价请求失败: {str(e)}"}
+
+
+@app.post("/api/ledger/entries")
+async def create_ledger_entry(request: Request):
+    body = await request.json()
+    entry_type = body.get("entry_type", "expense")
+    if entry_type not in ("expense", "income"):
+        raise HTTPException(status_code=400, detail="entry_type 必须为 expense 或 income")
+    amount = float(body.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="金额必须大于0")
+    category = body.get("category", "其他")
+    note = body.get("note", "")
+    entry_date = body.get("entry_date", datetime.now().strftime("%Y-%m-%d"))
+    entry_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(LedgerEntry(
+            id=entry_id, entry_type=entry_type, amount=amount,
+            category=category, note=note or None, entry_date=entry_date
+        ))
+        db.commit()
+        return {"status": "ok", "id": entry_id}
+    finally:
+        db.close()
+
+
+@app.get("/api/ledger/entries")
+async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        q = db.query(LedgerEntry)
+        if year:
+            if month:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-{month:0>2}-%"))
+            else:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-%"))
+        entries = q.order_by(LedgerEntry.entry_date.desc(), LedgerEntry.created_at.desc()).all()
+        return [
+            {
+                "id": e.id, "entry_type": e.entry_type, "amount": e.amount,
+                "category": e.category, "note": e.note or "",
+                "entry_date": e.entry_date,
+                "created_at": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else None
+            }
+            for e in entries
+        ]
+    finally:
+        db.close()
+
+
+@app.put("/api/ledger/entries/{entry_id}")
+async def update_ledger_entry(entry_id: str, request: Request):
+    body = await request.json()
+    db = SessionLocal()
+    try:
+        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id).first()
+        if not entry:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        if "entry_type" in body:
+            entry.entry_type = body["entry_type"]
+        if "amount" in body:
+            entry.amount = float(body["amount"])
+        if "category" in body:
+            entry.category = body["category"]
+        if "note" in body:
+            entry.note = body["note"]
+        if "entry_date" in body:
+            entry.entry_date = body["entry_date"]
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
+@app.delete("/api/ledger/entries/{entry_id}")
+async def delete_ledger_entry(entry_id: str):
+    db = SessionLocal()
+    try:
+        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id).first()
+        if not entry:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        db.delete(entry)
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
+@app.get("/api/ledger/summary")
+async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        q = db.query(LedgerEntry)
+        if year:
+            if month:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-{month:0>2}-%"))
+            else:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-%"))
+        entries = q.all()
+        expense_total = 0.0
+        income_total = 0.0
+        expense_map = {}
+        income_map = {}
+        for e in entries:
+            if e.entry_type == "expense":
+                expense_total += e.amount
+                expense_map[e.category] = expense_map.get(e.category, 0.0) + e.amount
+            else:
+                income_total += e.amount
+                income_map[e.category] = income_map.get(e.category, 0.0) + e.amount
+
+        def to_list(m):
+            return [
+                {"category": k, "amount": round(v, 2)}
+                for k, v in sorted(m.items(), key=lambda x: -x[1])
+            ]
+
+        return {
+            "expense_total": round(expense_total, 2),
+            "income_total": round(income_total, 2),
+            "expense_by_category": to_list(expense_map),
+            "income_by_category": to_list(income_map)
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/ledger/parse_voice")
+async def parse_voice(request: Request):
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="缺少语音识别文本")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if LLM_API_KEY:
+        import httpx
+        prompt = f"""你是个人记账助手，请把用户的口语化描述解析成一条记账记录。
+可选支出分类：{"/".join(LEDGER_CATEGORIES["expense"])}
+可选收入分类：{"/".join(LEDGER_CATEGORIES["income"])}
+规则：
+1. type：支出为"expense"，收入为"income"（如"工资"、"赚了"、"收入"、"奖金"、"到账"等属于收入）
+2. amount：提取金额数字（单位元），只返回数字，如"一百块"转为100
+3. category：从上面分类中选择最匹配的一个，支出若无法判断选"其他"
+4. note：一句话简要备注（可选，可为空字符串）
+5. date：日期 YYYY-MM-DD，若用户没说明日期则用今天 {today}
+
+用户说：{text}
+
+只返回JSON，格式：{{"type":"expense","amount":100,"category":"餐饮","note":"午饭","date":"{today}"}}"""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{LLM_BASE_URL}/chat/completions",
+                    headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+                    json={"model": LLM_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    raw = raw.strip()
+                    if raw.startswith("```"):
+                        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                        raw = raw.rsplit("```", 1)[0]
+                    result = json.loads(raw)
+                    result["type"] = result.get("type", "expense")
+                    if result["type"] not in ("expense", "income"):
+                        result["type"] = "expense"
+                    result.setdefault("amount", 0)
+                    result.setdefault("category", "其他")
+                    result.setdefault("note", "")
+                    result.setdefault("date", today)
+                    return {"status": "ok", "data": result}
+        except Exception as e:
+            logger.error(f"Voice parse error: {e}")
+
+    return {"status": "ok", "data": basic_parse_voice(text, today)}
+
+
+def basic_parse_voice(text: str, today: str):
+    import re
+    lower = text.lower()
+    entry_type = "expense"
+    for kw in ["工资", "奖金", "收入", "赚", "到账", "红包", "理财", "进账", "发了"]:
+        if kw in text:
+            entry_type = "income"
+            break
+    m = re.search(r'(\d+(?:\.\d+)?)', text)
+    amount = float(m.group(1)) if m else 0.0
+    category = "其他"
+    for cat in LEDGER_CATEGORIES["expense"] + LEDGER_CATEGORIES["income"]:
+        if cat in text:
+            category = cat
+            break
+    return {"type": entry_type, "amount": amount, "category": category, "note": text, "date": today}
 
 
 if os.path.exists(FRONTEND_DIST):

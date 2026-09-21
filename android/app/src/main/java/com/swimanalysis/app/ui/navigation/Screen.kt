@@ -8,6 +8,10 @@ sealed class Screen(val route: String, val title: String) {
     data object Album : Screen("album", "相册")
     data object Profile : Screen("profile", "我的")
 
+    data object Ledger : Screen("ledger", "账单")
+    data object Stats : Screen("stats", "统计")
+    data object AddEntry : Screen("add_entry", "记一笔")
+
     data object RecordDetail : Screen("record/{recordId}", "记录详情")
     data object VideoPlayer : Screen("video/{videoId}", "视频播放")
     data object VideoAnnotate : Screen("annotate/{videoId}", "视频标注")

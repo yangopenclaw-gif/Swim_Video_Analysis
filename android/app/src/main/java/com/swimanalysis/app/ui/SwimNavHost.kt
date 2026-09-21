@@ -3,12 +3,9 @@ package com.swimanalysis.app.ui
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.outlined.Analytics
-import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -40,6 +37,9 @@ import com.swimanalysis.app.ui.screen.VideoPlayerScreenFull
 import com.swimanalysis.app.ui.screen.VideosScreen
 import com.swimanalysis.app.ui.screen.ProfileScreen
 import com.swimanalysis.app.album.AlbumScreen
+import com.swimanalysis.app.ui.screen.ledger.AddEntryScreen
+import com.swimanalysis.app.ui.screen.ledger.LedgerScreen
+import com.swimanalysis.app.ui.screen.ledger.StatsScreen
 
 private data class BottomItem(
     val screen: Screen,
@@ -48,10 +48,8 @@ private data class BottomItem(
 )
 
 private val bottomItems = listOf(
-    BottomItem(Screen.Home, Icons.Filled.Home, "首页"),
-    BottomItem(Screen.Records, Icons.Outlined.Analytics, "记录"),
-
-    BottomItem(Screen.Album, Icons.Outlined.PhotoLibrary, "相册"),
+    BottomItem(Screen.Ledger, Icons.Filled.ReceiptLong, "账单"),
+    BottomItem(Screen.Stats, Icons.Outlined.Analytics, "统计"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
 )
 
@@ -92,9 +90,13 @@ fun SwimNavHost() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Home.route,
+            startDestination = Screen.Ledger.route,
             modifier = Modifier.padding(innerPadding)
         ) {
+            composable(Screen.Ledger.route) { LedgerScreen(navController) }
+            composable(Screen.Stats.route) { StatsScreen() }
+            composable(Screen.AddEntry.route) { AddEntryScreen(navController) }
+
             composable(Screen.Home.route) { HomeScreen(navController) }
             composable(Screen.Records.route) { RecordsScreen(navController) }
             composable(Screen.Upload.route) { UploadScreenFull(navController) }

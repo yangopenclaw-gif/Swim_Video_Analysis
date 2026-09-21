@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.media.VideoPicker
 import com.swimanalysis.app.ui.navigation.Screen
 
@@ -665,7 +666,13 @@ fun ProfileScreen(navController: NavController) {
             Text("个人中心", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "泳者档案、设置等功能",
+                text = "个人记账本 v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "支持按月/按年统计收支、语音记账",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
