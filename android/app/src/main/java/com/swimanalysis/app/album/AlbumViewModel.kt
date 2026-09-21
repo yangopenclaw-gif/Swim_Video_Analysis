@@ -146,16 +146,31 @@ class AlbumViewModel @Inject constructor(
     }
 
     fun startScan() {
-        val referenceFeatures = _state.value.referenceFeatures
-        val hasFeatures = PERSONS.any { (referenceFeatures[it]?.size ?: 0) > 0 }
-        if (!hasFeatures) {
+        val referenceUris = _state.value.referenceUris
+        val hasReferences = PERSONS.any { (referenceUris[it]?.size ?: 0) > 0 }
+        if (!hasReferences) {
             _state.update { it.copy(error = "请先为至少一个孩子添加参考照片") }
             return
         }
 
-        val currentReferenceUris = _state.value.referenceUris
         _state.update { it.copy(isScanning = true, error = null, scanMessage = "准备扫描...") }
         viewModelScope.launch {
+            var referenceFeatures = _state.value.referenceFeatures
+            val hasFeatures = PERSONS.any { (referenceFeatures[it]?.size ?: 0) > 0 }
+            if (!hasFeatures) {
+                // 升级用户：已有参考照片但缺少特征文件，现场提取并持久化
+                referenceFeatures = PERSONS.associateWith { name ->
+                    (referenceUris[name] ?: emptyList()).mapNotNull { uri ->
+                        val feature = faceRecognizer.extractFeature(context, uri)
+                        if (feature != null) {
+                            uri.path?.let { faceRecognizer.saveFeature(featureFileOf(it), feature) }
+                        }
+                        feature
+                    }
+                }
+                _state.update { it.copy(referenceFeatures = referenceFeatures) }
+            }
+
             photoScanner.scanAlbums(PERSONS, referenceFeatures).collect { scanState ->
                 _state.update {
                     AlbumUiState(
@@ -165,7 +180,7 @@ class AlbumViewModel @Inject constructor(
                         totalCount = scanState.totalCount,
                         scannedCount = scanState.scannedCount,
                         albums = scanState.albums,
-                        referenceUris = currentReferenceUris,
+                        referenceUris = referenceUris,
                         referenceFeatures = referenceFeatures,
                         selectedPerson = it.selectedPerson,
                         error = scanState.error
