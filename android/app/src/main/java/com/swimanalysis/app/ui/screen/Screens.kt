@@ -37,6 +37,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -657,9 +658,11 @@ fun VideosScreen(navController: NavController, viewModel: VideosViewModel = hilt
 @Composable
 fun ProfileScreen(
     navController: NavController,
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: SettingsViewModel = hiltViewModel(),
+    authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val username by authViewModel.username.collectAsState()
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("我的") }) }
@@ -672,6 +675,12 @@ fun ProfileScreen(
         ) {
             Text("个人中心", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "用户：${username ?: "未登录"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "个人记账本 v${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -734,6 +743,14 @@ fun ProfileScreen(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { authViewModel.logout() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("退出登录", color = MaterialTheme.colorScheme.error)
             }
         }
     }

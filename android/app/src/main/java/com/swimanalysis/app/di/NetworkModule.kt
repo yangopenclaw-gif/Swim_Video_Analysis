@@ -3,11 +3,13 @@ package com.swimanalysis.app.di
 import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.data.api.LedgerApi
 import com.swimanalysis.app.data.api.SwimApi
+import com.swimanalysis.app.data.local.AuthStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -32,7 +34,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
+    fun provideOkHttpClient(authStore: AuthStore): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
@@ -40,7 +42,18 @@ object NetworkModule {
                 HttpLoggingInterceptor.Level.NONE
             }
         }
+        val authInterceptor = Interceptor { chain ->
+            val request = chain.request()
+            val token = authStore.currentToken()
+            val newRequest = if (token.isNullOrBlank()) {
+                request
+            } else {
+                request.newBuilder().header("Authorization", "Bearer $token").build()
+            }
+            chain.proceed(newRequest)
+        }
         return OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
             .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)

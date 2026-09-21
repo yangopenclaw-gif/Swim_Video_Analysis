@@ -85,7 +85,7 @@ fun AddEntryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("记一笔") },
+                title = { Text(if (state.isEdit) "编辑记录" else "记一笔") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
@@ -118,11 +118,25 @@ fun AddEntryScreen(
             OutlinedTextField(
                 value = state.amountText,
                 onValueChange = viewModel::setAmount,
-                label = { Text("金额（元）") },
+                label = { Text("金额") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            Text("币种", style = MaterialTheme.typography.labelLarge)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LedgerCurrencies.LIST.forEach { (code, name) ->
+                    FilterChip(
+                        selected = state.currency == code,
+                        onClick = { viewModel.setCurrency(code) },
+                        label = { Text(name) }
+                    )
+                }
+            }
 
             val categories = if (state.entryType == "expense") {
                 LedgerCategories.EXPENSE

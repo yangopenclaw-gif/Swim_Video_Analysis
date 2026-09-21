@@ -10,7 +10,7 @@ sealed class Screen(val route: String, val title: String) {
 
     data object Ledger : Screen("ledger", "账单")
     data object Stats : Screen("stats", "统计")
-    data object AddEntry : Screen("add_entry", "记一笔")
+    data object AddEntry : Screen("add_entry?entryId={entryId}", "记一笔")
 
     data object RecordDetail : Screen("record/{recordId}", "记录详情")
     data object VideoPlayer : Screen("video/{videoId}", "视频播放")

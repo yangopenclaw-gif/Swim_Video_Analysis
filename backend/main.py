@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,8 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Optional
 import logging
+import bcrypt
+import jwt
 
 from .swim_analyzer import SwimVideoAnalyzer
 
@@ -122,6 +124,23 @@ class LedgerEntry(Base):
     note = Column(String, nullable=True)
     entry_date = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    currency = Column(String, default="CNY")
+    amount_cny = Column(Float, default=0.0)
+    user_id = Column(String, nullable=True, index=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    currency = Column(String, primary_key=True)
+    rate = Column(Float, nullable=False)
 
 
 LEDGER_CATEGORIES = {
@@ -129,8 +148,119 @@ LEDGER_CATEGORIES = {
     "income": ["工资", "奖金", "理财", "红包", "其他"]
 }
 
+# 货币列表：code -> 中文名
+CURRENCIES = {
+    "CNY": "人民币",
+    "USD": "美元",
+    "EUR": "欧元",
+    "GBP": "英镑",
+    "EGP": "埃镑",
+    "HKD": "港币",
+    "JPY": "日元",
+}
+
+# 默认汇率：1 外币 = 多少人民币（CNY）
+DEFAULT_EXCHANGE_RATES = {
+    "CNY": 1.0,
+    "USD": 7.2,
+    "EUR": 7.8,
+    "GBP": 9.1,
+    "EGP": 0.15,
+    "HKD": 0.92,
+    "JPY": 0.048,
+}
+
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "swim-ledger-2026-secret-key-change-me")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 365
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def get_current_user_id(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未登录")
+    token = auth[7:].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload.get("sub", "")
+    except Exception:
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+
 
 Base.metadata.create_all(bind=engine)
+
+
+def _migrate_ledger_columns():
+    import sqlite3
+    conn = engine.raw_connection()
+    try:
+        cur = conn.cursor()
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(ledger_entries)").fetchall()]
+        if "currency" not in cols:
+            cur.execute("ALTER TABLE ledger_entries ADD COLUMN currency VARCHAR DEFAULT 'CNY'")
+        if "amount_cny" not in cols:
+            cur.execute("ALTER TABLE ledger_entries ADD COLUMN amount_cny FLOAT DEFAULT 0.0")
+        if "user_id" not in cols:
+            cur.execute("ALTER TABLE ledger_entries ADD COLUMN user_id VARCHAR")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_migrate_ledger_columns()
+
+EXCHANGE_RATES = {}
+
+
+def _init_exchange_rates():
+    dbs = SessionLocal()
+    try:
+        existing = {r.currency for r in dbs.query(ExchangeRate).all()}
+        for code, rate in DEFAULT_EXCHANGE_RATES.items():
+            if code not in existing:
+                dbs.add(ExchangeRate(currency=code, rate=rate))
+        dbs.commit()
+        for r in dbs.query(ExchangeRate).all():
+            EXCHANGE_RATES[r.currency] = r.rate
+    finally:
+        dbs.close()
+
+
+_init_exchange_rates()
+
+
+def _backfill_ledger_amount_cny():
+    dbs = SessionLocal()
+    try:
+        for e in dbs.query(LedgerEntry).all():
+            rate = EXCHANGE_RATES.get(e.currency or "CNY", 1.0)
+            if e.amount_cny == 0.0 and e.amount != 0:
+                e.amount_cny = round(e.amount * rate, 2)
+        dbs.commit()
+    finally:
+        dbs.close()
+
+
+_backfill_ledger_amount_cny()
 
 db = SessionLocal()
 try:
@@ -1799,7 +1929,7 @@ async def compare_evaluate(request: Request):
 
 
 @app.post("/api/ledger/entries")
-async def create_ledger_entry(request: Request):
+async def create_ledger_entry(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
     entry_type = body.get("entry_type", "expense")
     if entry_type not in ("expense", "income"):
@@ -1810,12 +1940,18 @@ async def create_ledger_entry(request: Request):
     category = body.get("category", "其他")
     note = body.get("note", "")
     entry_date = body.get("entry_date", datetime.now().strftime("%Y-%m-%d"))
+    currency = (body.get("currency") or "CNY").upper()
+    if currency not in CURRENCIES:
+        currency = "CNY"
+    rate = EXCHANGE_RATES.get(currency, 1.0)
+    amount_cny = round(amount * rate, 2)
     entry_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         db.add(LedgerEntry(
             id=entry_id, entry_type=entry_type, amount=amount,
-            category=category, note=note or None, entry_date=entry_date
+            category=category, note=note or None, entry_date=entry_date,
+            currency=currency, amount_cny=amount_cny, user_id=user_id
         ))
         db.commit()
         return {"status": "ok", "id": entry_id}
@@ -1824,10 +1960,10 @@ async def create_ledger_entry(request: Request):
 
 
 @app.get("/api/ledger/entries")
-async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] = None):
+async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        q = db.query(LedgerEntry)
+        q = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)
         if year:
             if month:
                 q = q.filter(LedgerEntry.entry_date.like(f"{year}-{month:0>2}-%"))
@@ -1839,6 +1975,8 @@ async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] =
                 "id": e.id, "entry_type": e.entry_type, "amount": e.amount,
                 "category": e.category, "note": e.note or "",
                 "entry_date": e.entry_date,
+                "currency": e.currency or "CNY",
+                "amount_cny": round(e.amount_cny or 0.0, 2),
                 "created_at": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else None
             }
             for e in entries
@@ -1848,11 +1986,11 @@ async def list_ledger_entries(year: Optional[str] = None, month: Optional[str] =
 
 
 @app.put("/api/ledger/entries/{entry_id}")
-async def update_ledger_entry(entry_id: str, request: Request):
+async def update_ledger_entry(entry_id: str, request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
     db = SessionLocal()
     try:
-        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id).first()
+        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id, LedgerEntry.user_id == user_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="记录不存在")
         if "entry_type" in body:
@@ -1865,6 +2003,12 @@ async def update_ledger_entry(entry_id: str, request: Request):
             entry.note = body["note"]
         if "entry_date" in body:
             entry.entry_date = body["entry_date"]
+        if "currency" in body:
+            cur = str(body["currency"]).upper()
+            if cur in CURRENCIES:
+                entry.currency = cur
+        rate = EXCHANGE_RATES.get(entry.currency or "CNY", 1.0)
+        entry.amount_cny = round(entry.amount * rate, 2)
         db.commit()
         return {"status": "ok"}
     finally:
@@ -1872,10 +2016,10 @@ async def update_ledger_entry(entry_id: str, request: Request):
 
 
 @app.delete("/api/ledger/entries/{entry_id}")
-async def delete_ledger_entry(entry_id: str):
+async def delete_ledger_entry(entry_id: str, user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id).first()
+        entry = db.query(LedgerEntry).filter(LedgerEntry.id == entry_id, LedgerEntry.user_id == user_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="记录不存在")
         db.delete(entry)
@@ -1886,10 +2030,10 @@ async def delete_ledger_entry(entry_id: str):
 
 
 @app.get("/api/ledger/summary")
-async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None):
+async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        q = db.query(LedgerEntry)
+        q = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)
         if year:
             if month:
                 q = q.filter(LedgerEntry.entry_date.like(f"{year}-{month:0>2}-%"))
@@ -1901,12 +2045,13 @@ async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None
         expense_map = {}
         income_map = {}
         for e in entries:
+            amt = e.amount_cny if e.amount_cny else e.amount
             if e.entry_type == "expense":
-                expense_total += e.amount
-                expense_map[e.category] = expense_map.get(e.category, 0.0) + e.amount
+                expense_total += amt
+                expense_map[e.category] = expense_map.get(e.category, 0.0) + amt
             else:
-                income_total += e.amount
-                income_map[e.category] = income_map.get(e.category, 0.0) + e.amount
+                income_total += amt
+                income_map[e.category] = income_map.get(e.category, 0.0) + amt
 
         def to_list(m):
             return [
@@ -1925,7 +2070,7 @@ async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None
 
 
 @app.post("/api/ledger/parse_voice")
-async def parse_voice(request: Request):
+async def parse_voice(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
     text = (body.get("text") or "").strip()
     if not text:
@@ -1992,6 +2137,91 @@ def basic_parse_voice(text: str, today: str):
             category = cat
             break
     return {"type": entry_type, "amount": amount, "category": category, "note": text, "date": today}
+
+
+@app.post("/api/auth/register")
+async def register(request: Request):
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username or len(username) > 32:
+        raise HTTPException(status_code=400, detail="用户名不能为空且不超过32个字符")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="密码至少4位")
+    db = SessionLocal()
+    try:
+        if db.query(User).filter(User.username == username).first():
+            raise HTTPException(status_code=409, detail="用户名已存在")
+        is_first_user = db.query(User).count() == 0
+        uid = str(uuid.uuid4())
+        db.add(User(id=uid, username=username, password_hash=hash_password(password)))
+        db.commit()
+        if is_first_user:
+            db.query(LedgerEntry).filter(LedgerEntry.user_id == None).update({LedgerEntry.user_id: uid})
+            db.commit()
+        return {"status": "ok", "token": create_token(uid), "username": username}
+    finally:
+        db.close()
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user or not verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        return {"status": "ok", "token": create_token(user.id), "username": user.username}
+    finally:
+        db.close()
+
+
+@app.get("/api/auth/me")
+async def auth_me(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="用户不存在")
+        return {"status": "ok", "username": user.username}
+    finally:
+        db.close()
+
+
+@app.get("/api/ledger/currencies")
+async def get_currencies(user_id: str = Depends(get_current_user_id)):
+    return {
+        "currencies": [
+            {"code": c, "name": CURRENCIES[c], "rate": EXCHANGE_RATES.get(c, 1.0)}
+            for c in CURRENCIES
+        ]
+    }
+
+
+@app.put("/api/ledger/rates/{currency}")
+async def update_rate(currency: str, request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    rate = float(body.get("rate", 0))
+    if rate <= 0:
+        raise HTTPException(status_code=400, detail="汇率必须大于0")
+    code = currency.upper()
+    if code not in CURRENCIES:
+        raise HTTPException(status_code=400, detail="未知货币")
+    db = SessionLocal()
+    try:
+        rec = db.query(ExchangeRate).filter(ExchangeRate.currency == code).first()
+        if rec:
+            rec.rate = rate
+        else:
+            db.add(ExchangeRate(currency=code, rate=rate))
+        db.commit()
+        EXCHANGE_RATES[code] = rate
+        return {"status": "ok"}
+    finally:
+        db.close()
 
 
 if os.path.exists(FRONTEND_DIST):

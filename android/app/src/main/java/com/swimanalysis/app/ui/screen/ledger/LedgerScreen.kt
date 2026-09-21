@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +44,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.swimanalysis.app.data.model.LedgerEntryDto
-import com.swimanalysis.app.ui.navigation.Screen
+
 
 private fun formatAmount(value: Double): String {
     return if (value == value.toLong().toDouble()) {
@@ -65,6 +70,22 @@ fun LedgerScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var pendingDelete by remember { mutableStateOf<LedgerEntryDto?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isFirstResume by remember { mutableStateOf(true) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (isFirstResume) {
+                    isFirstResume = false
+                } else {
+                    viewModel.load()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         topBar = {
@@ -89,7 +110,7 @@ fun LedgerScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { navController.navigate(Screen.AddEntry.route) }) {
+            FloatingActionButton(onClick = { navController.navigate("add_entry") }) {
                 Icon(Icons.Filled.Add, contentDescription = "记一笔")
             }
         }
@@ -130,7 +151,8 @@ fun LedgerScreen(
                     items(state.entries, key = { it.id }) { entry ->
                         EntryCard(
                             entry = entry,
-                            onDelete = { pendingDelete = entry }
+                            onDelete = { pendingDelete = entry },
+                            onEdit = { navController.navigate("add_entry?entryId=${entry.id}") }
                         )
                     }
                 }
@@ -195,7 +217,7 @@ private fun SummaryHeader(expense: Double, income: Double) {
 }
 
 @Composable
-private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit) {
+private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () -> Unit) {
     val isExpense = entry.entryType != "income"
     val amountColor = if (isExpense) Color(0xFFE53935) else Color(0xFF43A047)
     Card(
@@ -232,13 +254,30 @@ private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                "${if (isExpense) "-" else "+"}${formatAmount(entry.amount)}",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = amountColor
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                val currencyLabel = if (entry.currency == "CNY") "" else " ${LedgerCurrencies.name(entry.currency)}"
+                Text(
+                    "${if (isExpense) "-" else "+"}${formatAmount(entry.amount)}$currencyLabel",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = amountColor
+                )
+                if (entry.currency != "CNY") {
+                    Text(
+                        "≈¥${formatAmount(entry.amountCny)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "编辑",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             IconButton(onClick = onDelete) {
                 Icon(
                     Icons.Filled.Delete,

@@ -11,6 +11,8 @@ data class LedgerEntryDto(
     val category: String = "其他",
     val note: String = "",
     @SerialName("entry_date") val entryDate: String = "",
+    val currency: String = "CNY",
+    @SerialName("amount_cny") val amountCny: Double = 0.0,
     @SerialName("created_at") val createdAt: String? = null
 )
 
@@ -34,7 +36,8 @@ data class CreateLedgerEntryRequest(
     val amount: Double,
     val category: String,
     val note: String = "",
-    @SerialName("entry_date") val entryDate: String
+    @SerialName("entry_date") val entryDate: String,
+    val currency: String = "CNY"
 )
 
 @Serializable
@@ -43,7 +46,33 @@ data class UpdateLedgerEntryRequest(
     val amount: Double? = null,
     val category: String? = null,
     val note: String? = null,
-    @SerialName("entry_date") val entryDate: String? = null
+    @SerialName("entry_date") val entryDate: String? = null,
+    val currency: String? = null
+)
+
+@Serializable
+data class AuthRequest(
+    val username: String,
+    val password: String
+)
+
+@Serializable
+data class AuthResponse(
+    val status: String = "",
+    val token: String = "",
+    val username: String = ""
+)
+
+@Serializable
+data class CurrencyDto(
+    val code: String = "",
+    val name: String = "",
+    val rate: Double = 0.0
+)
+
+@Serializable
+data class CurrencyListResponse(
+    val currencies: List<CurrencyDto> = emptyList()
 )
 
 @Serializable

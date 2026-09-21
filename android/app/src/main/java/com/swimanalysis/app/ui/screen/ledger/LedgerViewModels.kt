@@ -1,9 +1,11 @@
 package com.swimanalysis.app.ui.screen.ledger
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.data.model.LedgerSummary
+import com.swimanalysis.app.data.model.UpdateLedgerEntryRequest
 import com.swimanalysis.app.data.repository.LedgerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +20,20 @@ import javax.inject.Inject
 object LedgerCategories {
     val EXPENSE = listOf("自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "其他")
     val INCOME = listOf("工资", "奖金", "理财", "红包", "其他")
+}
+
+object LedgerCurrencies {
+    val LIST = listOf(
+        "CNY" to "人民币",
+        "USD" to "美元",
+        "EUR" to "欧元",
+        "GBP" to "英镑",
+        "EGP" to "埃镑",
+        "HKD" to "港币",
+        "JPY" to "日元"
+    )
+
+    fun name(code: String): String = LIST.find { it.first == code }?.second ?: code
 }
 
 data class LedgerUiState(
@@ -144,6 +160,8 @@ data class AddEntryUiState(
     val category: String = "其他",
     val note: String = "",
     val entryDate: String = LocalDate.now().toString(),
+    val currency: String = "CNY",
+    val isEdit: Boolean = false,
     val isParsing: Boolean = false,
     val parseError: String? = null,
     val submitting: Boolean = false,
@@ -153,10 +171,16 @@ data class AddEntryUiState(
 
 @HiltViewModel
 class AddEntryViewModel @Inject constructor(
-    private val repository: LedgerRepository
+    private val repository: LedgerRepository,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
-    private val _state = MutableStateFlow(AddEntryUiState())
+    private val entryId: String? = savedStateHandle["entryId"]
+    private val _state = MutableStateFlow(AddEntryUiState(isEdit = entryId != null))
     val state: StateFlow<AddEntryUiState> = _state.asStateFlow()
+
+    init {
+        entryId?.let { loadEntry(it) }
+    }
 
     fun setEntryType(type: String) {
         val category = if (type == "expense") "其他" else "其他"
@@ -167,6 +191,29 @@ class AddEntryViewModel @Inject constructor(
     fun setCategory(category: String) = _state.update { it.copy(category = category) }
     fun setNote(text: String) = _state.update { it.copy(note = text) }
     fun setDate(text: String) = _state.update { it.copy(entryDate = text) }
+    fun setCurrency(code: String) = _state.update { it.copy(currency = code) }
+
+    private fun loadEntry(id: String) {
+        viewModelScope.launch {
+            try {
+                val entry = repository.getEntries(null, null).find { it.id == id }
+                if (entry != null) {
+                    _state.update {
+                        it.copy(
+                            entryType = entry.entryType,
+                            amountText = formatAmount(entry.amount),
+                            category = entry.category,
+                            note = entry.note,
+                            entryDate = entry.entryDate,
+                            currency = entry.currency.ifBlank { "CNY" }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
 
     fun parseVoice(text: String) {
         if (text.isBlank()) return
@@ -206,7 +253,21 @@ class AddEntryViewModel @Inject constructor(
         val s = _state.value
         viewModelScope.launch {
             try {
-                repository.createEntry(s.entryType, amount, s.category, s.note, s.entryDate)
+                if (entryId != null) {
+                    repository.updateEntry(
+                        entryId,
+                        UpdateLedgerEntryRequest(
+                            entryType = s.entryType,
+                            amount = amount,
+                            category = s.category,
+                            note = s.note,
+                            entryDate = s.entryDate,
+                            currency = s.currency
+                        )
+                    )
+                } else {
+                    repository.createEntry(s.entryType, amount, s.category, s.note, s.entryDate, s.currency)
+                }
                 _state.update { it.copy(submitting = false, submitSuccess = true) }
             } catch (e: Exception) {
                 _state.update { it.copy(submitting = false, error = e.message) }

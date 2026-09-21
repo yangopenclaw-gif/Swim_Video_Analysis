@@ -1,6 +1,9 @@
 package com.swimanalysis.app.data.api
 
+import com.swimanalysis.app.data.model.AuthRequest
+import com.swimanalysis.app.data.model.AuthResponse
 import com.swimanalysis.app.data.model.CreateLedgerEntryRequest
+import com.swimanalysis.app.data.model.CurrencyListResponse
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.data.model.LedgerSummary
 import com.swimanalysis.app.data.model.ParseVoiceRequest
@@ -42,4 +45,16 @@ interface LedgerApi {
 
     @POST("/api/ledger/parse_voice")
     suspend fun parseVoice(@Body body: ParseVoiceRequest): ParseVoiceResponse
+
+    @POST("/api/auth/register")
+    suspend fun register(@Body body: AuthRequest): AuthResponse
+
+    @POST("/api/auth/login")
+    suspend fun login(@Body body: AuthRequest): AuthResponse
+
+    @GET("/api/auth/me")
+    suspend fun me(): AuthResponse
+
+    @GET("/api/ledger/currencies")
+    suspend fun getCurrencies(): CurrencyListResponse
 }
