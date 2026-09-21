@@ -20,3 +20,7 @@ staging/uploads/
 staging/avatars/
 uploads/.chunks/
 data/thumbnails/
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
