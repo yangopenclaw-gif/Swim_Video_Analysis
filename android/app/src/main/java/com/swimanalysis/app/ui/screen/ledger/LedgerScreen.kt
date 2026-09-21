@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -43,6 +44,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +56,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.swimanalysis.app.data.model.LedgerEntryDto
+import com.swimanalysis.app.ui.theme.ExpenseRed
+import com.swimanalysis.app.ui.theme.IncomeGreen
+import com.swimanalysis.app.ui.theme.WarmCoral
+import com.swimanalysis.app.ui.theme.WarmPeach
 
 
 private fun formatAmount(value: Double): String {
@@ -180,36 +188,43 @@ fun LedgerScreen(
 
 @Composable
 private fun SummaryHeader(expense: Double, income: Double) {
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .shadow(8.dp, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brush.horizontalGradient(listOf(WarmCoral, WarmPeach)))
+            .padding(20.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("本月支出", style = MaterialTheme.typography.bodyMedium)
+                Text("本月支出", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${formatAmount(expense)}",
+                    formatAmount(expense),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFE53935)
+                    color = Color.White
                 )
             }
+            Box(
+                modifier = Modifier
+                    .size(width = 1.dp, height = 40.dp)
+                    .background(Color.White.copy(alpha = 0.35f))
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("本月收入", style = MaterialTheme.typography.bodyMedium)
+                Text("本月收入", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${formatAmount(income)}",
+                    formatAmount(income),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF43A047)
+                    color = Color.White
                 )
             }
         }
@@ -219,10 +234,12 @@ private fun SummaryHeader(expense: Double, income: Double) {
 @Composable
 private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () -> Unit) {
     val isExpense = entry.entryType != "income"
-    val amountColor = if (isExpense) Color(0xFFE53935) else Color(0xFF43A047)
+    val amountColor = if (isExpense) ExpenseRed else IncomeGreen
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Row(
             modifier = Modifier

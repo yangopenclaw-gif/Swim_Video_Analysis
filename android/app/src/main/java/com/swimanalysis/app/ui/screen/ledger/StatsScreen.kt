@@ -34,11 +34,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swimanalysis.app.data.model.CategoryStat
+import com.swimanalysis.app.ui.theme.ExpenseRed
+import com.swimanalysis.app.ui.theme.IncomeGreen
+import com.swimanalysis.app.ui.theme.WarmCoral
+import com.swimanalysis.app.ui.theme.WarmPeach
 
 private fun formatAmount(value: Double): String {
     return if (value == value.toLong().toDouble()) {
@@ -128,7 +134,7 @@ fun StatsScreen(
                         item { Text("暂无支出", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     } else {
                         items(state.summary.expenseByCategory) { cat ->
-                            CategoryBar(cat, state.summary.expenseTotal, Color(0xFFE53935))
+                            CategoryBar(cat, state.summary.expenseTotal, ExpenseRed)
                         }
                     }
                     item {
@@ -139,7 +145,7 @@ fun StatsScreen(
                         item { Text("暂无收入", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     } else {
                         items(state.summary.incomeByCategory) { cat ->
-                            CategoryBar(cat, state.summary.incomeTotal, Color(0xFF43A047))
+                            CategoryBar(cat, state.summary.incomeTotal, IncomeGreen)
                         }
                     }
                 }
@@ -150,40 +156,43 @@ fun StatsScreen(
 
 @Composable
 private fun TotalsCard(expense: Double, income: Double) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(8.dp, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brush.horizontalGradient(listOf(WarmCoral, WarmPeach)))
+            .padding(20.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("支出", style = MaterialTheme.typography.bodyMedium)
+                Text("支出", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                 Text(
                     formatAmount(expense),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFE53935)
+                    color = Color.White
                 )
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("收入", style = MaterialTheme.typography.bodyMedium)
+                Text("收入", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                 Text(
                     formatAmount(income),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF43A047)
+                    color = Color.White
                 )
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("结余", style = MaterialTheme.typography.bodyMedium)
+                Text("结余", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
                 Text(
                     formatAmount(income - expense),
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
         }
