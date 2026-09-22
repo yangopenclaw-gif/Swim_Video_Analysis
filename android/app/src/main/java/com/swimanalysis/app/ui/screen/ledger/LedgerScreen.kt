@@ -31,6 +31,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +51,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -78,7 +81,10 @@ fun LedgerScreen(
     viewModel: LedgerViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val passwordCheck by viewModel.passwordCheck.collectAsState()
+    var pendingEdit by remember { mutableStateOf<LedgerEntryDto?>(null) }
     var pendingDelete by remember { mutableStateOf<LedgerEntryDto?>(null) }
+    var passwordInput by remember { mutableStateOf("") }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     var isFirstResume by remember { mutableStateOf(true) }
@@ -160,8 +166,18 @@ fun LedgerScreen(
                     items(state.entries, key = { it.id }) { entry ->
                         EntryCard(
                             entry = entry,
-                            onDelete = { pendingDelete = entry },
-                            onEdit = { navController.navigate("add_entry?entryId=${entry.id}") }
+                            onDelete = {
+                                pendingEdit = null
+                                pendingDelete = entry
+                                passwordInput = ""
+                                viewModel.clearPasswordError()
+                            },
+                            onEdit = {
+                                pendingDelete = null
+                                pendingEdit = entry
+                                passwordInput = ""
+                                viewModel.clearPasswordError()
+                            }
                         )
                     }
                 }
@@ -169,19 +185,69 @@ fun LedgerScreen(
         }
     }
 
-    pendingDelete?.let { entry ->
+    if (pendingEdit != null || pendingDelete != null) {
+        val editing = pendingEdit != null
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除记录") },
-            text = { Text("确定删除「${entry.category} ${formatAmount(entry.amount)}元」这条记录吗？") },
+            onDismissRequest = {
+                pendingEdit = null
+                pendingDelete = null
+                viewModel.clearPasswordError()
+            },
+            title = { Text(if (editing) "验证身份" else "删除验证") },
+            text = {
+                Column {
+                    Text(
+                        if (editing) "修改记录前请输入登录密码" else "删除记录前请输入登录密码",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = passwordInput,
+                        onValueChange = {
+                            passwordInput = it
+                            if (passwordCheck.error != null) viewModel.clearPasswordError()
+                        },
+                        label = { Text("密码") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    passwordCheck.error?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteEntry(entry.id)
-                    pendingDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                TextButton(
+                    onClick = {
+                        val entry = pendingEdit ?: pendingDelete ?: return@TextButton
+                        viewModel.verifyPassword(passwordInput) {
+                            pendingEdit = null
+                            pendingDelete = null
+                            passwordInput = ""
+                            if (editing) {
+                                navController.navigate("add_entry?entryId=${entry.id}")
+                            } else {
+                                viewModel.deleteEntry(entry.id)
+                            }
+                        }
+                    },
+                    enabled = passwordInput.isNotBlank() && !passwordCheck.checking
+                ) {
+                    Text(
+                        if (editing) "确认修改" else "确认删除",
+                        color = if (editing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = {
+                    pendingEdit = null
+                    pendingDelete = null
+                    viewModel.clearPasswordError()
+                }) { Text("取消") }
             }
         )
     }
@@ -238,46 +304,47 @@ private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () ->
     val amountColor = if (isExpense) ExpenseRed else IncomeGreen
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .background(amountColor.copy(alpha = 0.15f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(entry.category.take(1), color = amountColor, fontWeight = FontWeight.Bold)
+                Text(
+                    entry.category.take(1),
+                    color = amountColor,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(entry.category, style = MaterialTheme.typography.titleMedium)
-                if (entry.note.isNotBlank()) {
-                    Text(
-                        entry.note,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Text(
+                    entry.category,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium
+                )
+                val subtitle = buildString {
+                    if (entry.note.isNotBlank()) append(entry.note).append(" · ")
+                    append(entry.entryDate)
                 }
                 Text(
-                    entry.entryDate,
+                    subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                entry.createdAt?.let {
-                    Text(
-                        "录入于 $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 val items = if (entry.amounts.isNotEmpty()) entry.amounts
@@ -286,9 +353,10 @@ private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () ->
                     val unit = if (item.currency == "CNY") "元" else LedgerCurrencies.name(item.currency)
                     Text(
                         "${if (isExpense) "-" else "+"}${formatAmount(item.amount)} $unit",
-                        style = if (i == 0) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+                        style = if (i == 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
                         fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal,
-                        color = amountColor
+                        color = amountColor,
+                        maxLines = 1
                     )
                 }
                 if (items.size > 1 || items.firstOrNull()?.currency != "CNY") {
@@ -299,20 +367,29 @@ private fun EntryCard(entry: LedgerEntryDto, onDelete: () -> Unit, onEdit: () ->
                     )
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onEdit) {
-                Icon(
-                    Icons.Filled.Edit,
-                    contentDescription = "编辑",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = "删除",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row {
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "编辑",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
             }
         }
     }

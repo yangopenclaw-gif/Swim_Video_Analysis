@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.data.model.LedgerSummary
+import com.swimanalysis.app.data.local.AuthStore
 import com.swimanalysis.app.data.model.UpdateLedgerEntryRequest
 import com.swimanalysis.app.data.repository.LedgerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,12 +46,21 @@ data class LedgerUiState(
     val error: String? = null
 )
 
+data class PasswordCheckState(
+    val checking: Boolean = false,
+    val error: String? = null
+)
+
 @HiltViewModel
 class LedgerViewModel @Inject constructor(
-    private val repository: LedgerRepository
+    private val repository: LedgerRepository,
+    private val authStore: AuthStore
 ) : ViewModel() {
     private val _state = MutableStateFlow(LedgerUiState())
     val state: StateFlow<LedgerUiState> = _state.asStateFlow()
+
+    private val _passwordCheck = MutableStateFlow(PasswordCheckState())
+    val passwordCheck: StateFlow<PasswordCheckState> = _passwordCheck.asStateFlow()
 
     init {
         load()
@@ -93,6 +103,31 @@ class LedgerViewModel @Inject constructor(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    fun verifyPassword(password: String, onVerified: () -> Unit) {
+        if (_passwordCheck.value.checking) return
+        val username = authStore.username.value
+        if (username.isNullOrBlank()) {
+            _passwordCheck.value = PasswordCheckState(error = "无法获取当前用户名，请重新登录")
+            return
+        }
+        _passwordCheck.value = PasswordCheckState(checking = true)
+        viewModelScope.launch {
+            try {
+                repository.login(username, password)
+                _passwordCheck.value = PasswordCheckState()
+                onVerified()
+            } catch (e: Exception) {
+                _passwordCheck.value = PasswordCheckState(error = "密码错误，请重试")
+            }
+        }
+    }
+
+    fun clearPasswordError() {
+        if (_passwordCheck.value.error != null) {
+            _passwordCheck.value = _passwordCheck.value.copy(error = null)
+        }
     }
 }
 

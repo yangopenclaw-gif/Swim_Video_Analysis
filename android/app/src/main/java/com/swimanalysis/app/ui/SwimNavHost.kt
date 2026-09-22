@@ -48,8 +48,8 @@ private data class BottomItem(
 )
 
 private val bottomItems = listOf(
-    BottomItem(Screen.Ledger, Icons.Filled.ReceiptLong, "账单"),
     BottomItem(Screen.Stats, Icons.Outlined.Analytics, "统计"),
+    BottomItem(Screen.Ledger, Icons.Filled.ReceiptLong, "账单"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
 )
 
@@ -90,7 +90,7 @@ fun SwimNavHost() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Ledger.route,
+            startDestination = Screen.Stats.route,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Ledger.route) { LedgerScreen(navController) }
