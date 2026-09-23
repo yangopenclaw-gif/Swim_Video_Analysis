@@ -87,15 +87,10 @@ fun LedgerScreen(
     var passwordInput by remember { mutableStateOf("") }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    var isFirstResume by remember { mutableStateOf(true) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                if (isFirstResume) {
-                    isFirstResume = false
-                } else {
-                    viewModel.load()
-                }
+                viewModel.load()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
