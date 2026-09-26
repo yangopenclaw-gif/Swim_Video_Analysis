@@ -4,10 +4,47 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- 腮红 -->
+    <path
+        android:fillColor="#FFCCBC"
+        android:pathData="M37.8,48a4.2,2.5 0 1,0 8.4,0a4.2,2.5 0 1,0 -8.4,0z" />
+    <path
+        android:fillColor="#FFCCBC"
+        android:pathData="M61.8,48a4.2,2.5 0 1,0 8.4,0a4.2,2.5 0 1,0 -8.4,0z" />
+
+    <!-- 账本主体 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,30 C50,30 47,33 47,37 C47,41 50,44 54,44 C58,44 61,41 61,37 C61,33 58,30 54,30 Z M54,46 C48,46 44,50 44,56 L44,72 C44,74 45,75 47,75 L49,75 L49,82 L59,82 L59,75 L61,75 C63,75 64,74 64,72 L64,56 C64,50 60,46 54,46 Z" />
+        android:pathData="M45,46L63,46A13,13 0 0 1 76,59L76,75A13,13 0 0 1 63,88L45,88A13,13 0 0 1 32,75L32,59A13,13 0 0 1 45,46z" />
+
+    <!-- 账本内页 -->
+    <path
+        android:fillColor="#FFF3E0"
+        android:pathData="M45,50L63,50A9,9 0 0 1 72,59L72,75A9,9 0 0 1 63,84L45,84A9,9 0 0 1 36,75L36,59A9,9 0 0 1 45,50z" />
+
+    <!-- 爱心书签 -->
+    <group
+        android:translateX="43"
+        android:translateY="53.5">
+        <path
+            android:fillColor="#FF7043"
+            android:pathData="M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z" />
+    </group>
+
+    <!-- 眼睛 -->
+    <path
+        android:fillColor="#5D4037"
+        android:pathData="M46,34.6a3.4,3.4 0 1,1 0,6.8a3.4,3.4 0 1,1 0,-6.8z" />
+    <path
+        android:fillColor="#5D4037"
+        android:pathData="M62,34.6a3.4,3.4 0 1,1 0,6.8a3.4,3.4 0 1,1 0,-6.8z" />
+
+    <!-- 眼睛高光 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M35,55 C33,55 31,57 31,59 C31,61 33,63 35,63 C37E37,61 39,59 39,57 C39,55 37,55 35,55 Z M73,55 C71,55 69,57 69,59 C69,61 71,63 73,63 C75,63 77,61 77,59 C77,57 75,55 73,55 Z" />
+        android:pathData="M47.3,35.9a1.1,1.1 0 1,1 0,2.2a1.1,1.1 0 1,1 0,-2.2z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M63.3,35.9a1.1,1.1 0 1,1 0,2.2a1.1,1.1 0 1,1 0,-2.2z" />
 </vector>
