@@ -168,7 +168,7 @@ fun ChatScreen(
             )
 
             if (state.messages.isEmpty() && state.streamingText.isBlank() && !state.isSending) {
-                EmptyState()
+                EmptyState(Modifier.weight(1f))
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -228,11 +228,9 @@ private fun QuickActions(onAction: (String) -> Unit, enabled: Boolean) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f),
+        modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
