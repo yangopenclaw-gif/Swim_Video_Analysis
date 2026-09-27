@@ -5,6 +5,8 @@ from typing import List
 
 logger = logging.getLogger("agent.kb")
 
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 _embedder = None
 
 

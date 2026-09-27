@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_DIR="/root/IDEProjects/Swim_Video_Analysis"
+PROJECT_DIR="/root/IDEProjects/jizhangben"
 STAGING_DIR="$PROJECT_DIR/staging"
 PROD_PORT=8000
 STAGING_PORT=8001

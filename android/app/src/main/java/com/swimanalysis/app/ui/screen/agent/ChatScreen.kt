@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,6 +75,8 @@ fun ChatScreen(
     val context = LocalContext.current
     var partialText by remember { mutableStateOf("") }
     var showKbDialog by remember { mutableStateOf(false) }
+    var listeningLevel by remember { mutableStateOf(0f) }
+    var voiceError by remember { mutableStateOf<String?>(null) }
 
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -89,9 +94,11 @@ fun ChatScreen(
             onPartialResult = { partialText = it },
             onFinalResult = { text ->
                 partialText = ""
+                voiceError = null
                 viewModel.send(text)
             },
-            onError = { }
+            onError = { voiceError = it },
+            onRms = { listeningLevel = it }
         )
     }
     DisposableEffect(Unit) {
@@ -126,6 +133,7 @@ fun ChatScreen(
 
     fun startVoice() {
         if (state.isSending) return
+        voiceError = null
         if (hasRecordPermission) {
             viewModel.setListening(true)
             voiceHelper.startListening()
@@ -191,7 +199,9 @@ fun ChatScreen(
                 text = partialText,
                 isSending = state.isSending,
                 listening = state.listening,
+                listeningLevel = listeningLevel,
                 statusText = state.statusText,
+                errorText = voiceError,
                 onTextChange = { partialText = it },
                 onSend = {
                     viewModel.send(partialText)
@@ -327,7 +337,9 @@ private fun InputBar(
     text: String,
     isSending: Boolean,
     listening: Boolean,
+    listeningLevel: Float,
     statusText: String,
+    errorText: String?,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMicDown: () -> Unit,
@@ -350,6 +362,14 @@ private fun InputBar(
                 Text(statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (errorText != null) {
+            Text(
+                errorText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            )
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = text,
@@ -371,14 +391,28 @@ private fun InputBar(
                     Icon(Icons.Filled.Stop, contentDescription = "停止", tint = Color.White)
                 }
             } else if (text.isBlank()) {
-                IconButton(
-                    onClick = { if (listening) onMicUp() else onMicDown() },
+                Box(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
                         .background(if (listening) WarmCoral else MaterialTheme.colorScheme.surfaceVariant)
+                        .graphicsLayer {
+                            val s = if (listening) 1f + (listeningLevel / 20f).coerceIn(0f, 0.25f) else 1f
+                            scaleX = s
+                            scaleY = s
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    onMicDown()
+                                    tryAwaitRelease()
+                                    onMicUp()
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Filled.Mic, contentDescription = "语音", tint = if (listening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.Mic, contentDescription = "按住说话", tint = if (listening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 IconButton(
