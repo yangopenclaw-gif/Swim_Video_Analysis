@@ -23,7 +23,6 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val streamingText: String = "",
     val statusText: String = "",
-    val listening: Boolean = false,
     val autoSpeak: Boolean = true,
     val spokenAssistantContent: String? = null,
     val error: String? = null
@@ -99,7 +98,6 @@ class ChatViewModel @Inject constructor(
     }
 
     fun toggleAutoSpeak() = _state.update { it.copy(autoSpeak = !it.autoSpeak) }
-    fun setListening(v: Boolean) = _state.update { it.copy(listening = v) }
     fun markSpoken(content: String) = _state.update { it.copy(spokenAssistantContent = content) }
     fun clearError() = _state.update { it.copy(error = null) }
 }

@@ -1,11 +1,13 @@
 package com.swimanalysis.app.ui.screen.agent
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,8 +56,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,36 +73,35 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    var partialText by remember { mutableStateOf("") }
+    var inputText by remember { mutableStateOf("") }
     var showKbDialog by remember { mutableStateOf(false) }
-    var listeningLevel by remember { mutableStateOf(0f) }
-    var voiceError by remember { mutableStateOf<String?>(null) }
 
-    var hasRecordPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> hasRecordPermission = granted }
-
-    val voiceHelper = remember {
-        VoiceHelper(
-            context = context,
-            onPartialResult = { partialText = it },
-            onFinalResult = { text ->
-                partialText = ""
-                voiceError = null
-                viewModel.send(text)
-            },
-            onError = { voiceError = it },
-            onRms = { listeningLevel = it }
-        )
-    }
+    val voiceHelper = remember { VoiceHelper(context = context) }
     DisposableEffect(Unit) {
         onDispose { voiceHelper.shutdown() }
+    }
+
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val text = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!text.isNullOrBlank()) {
+                viewModel.send(text)
+            }
+        }
+    }
+
+    fun launchVoice() {
+        if (state.isSending) return
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要告诉小账的话")
+        }
+        voiceLauncher.launch(intent)
     }
 
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -129,22 +128,6 @@ fun ChatScreen(
             viewModel.markSpoken(last)
             voiceHelper.speak(last)
         }
-    }
-
-    fun startVoice() {
-        if (state.isSending) return
-        voiceError = null
-        if (hasRecordPermission) {
-            viewModel.setListening(true)
-            voiceHelper.startListening()
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
-
-    fun stopVoice() {
-        viewModel.setListening(false)
-        voiceHelper.stopListening()
     }
 
     Scaffold(
@@ -196,19 +179,15 @@ fun ChatScreen(
             }
 
             InputBar(
-                text = partialText,
+                text = inputText,
                 isSending = state.isSending,
-                listening = state.listening,
-                listeningLevel = listeningLevel,
                 statusText = state.statusText,
-                errorText = voiceError,
-                onTextChange = { partialText = it },
+                onTextChange = { inputText = it },
                 onSend = {
-                    viewModel.send(partialText)
-                    partialText = ""
+                    viewModel.send(inputText)
+                    inputText = ""
                 },
-                onMicDown = { startVoice() },
-                onMicUp = { stopVoice() },
+                onMic = { launchVoice() },
                 onStopStreaming = { viewModel.stopStreaming() }
             )
         }
@@ -336,14 +315,10 @@ private fun AssistantAvatar() {
 private fun InputBar(
     text: String,
     isSending: Boolean,
-    listening: Boolean,
-    listeningLevel: Float,
     statusText: String,
-    errorText: String?,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
-    onMicDown: () -> Unit,
-    onMicUp: () -> Unit,
+    onMic: () -> Unit,
     onStopStreaming: () -> Unit
 ) {
     Column(
@@ -362,20 +337,12 @@ private fun InputBar(
                 Text(statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (errorText != null) {
-            Text(
-                errorText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
-        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(if (listening) "正在聆听…" else "输入或语音告诉我") },
+                placeholder = { Text("输入或语音告诉我") },
                 maxLines = 3,
                 shape = RoundedCornerShape(24.dp)
             )
@@ -391,28 +358,14 @@ private fun InputBar(
                     Icon(Icons.Filled.Stop, contentDescription = "停止", tint = Color.White)
                 }
             } else if (text.isBlank()) {
-                Box(
+                IconButton(
+                    onClick = onMic,
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(if (listening) WarmCoral else MaterialTheme.colorScheme.surfaceVariant)
-                        .graphicsLayer {
-                            val s = if (listening) 1f + (listeningLevel / 20f).coerceIn(0f, 0.25f) else 1f
-                            scaleX = s
-                            scaleY = s
-                        }
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onPress = {
-                                    onMicDown()
-                                    tryAwaitRelease()
-                                    onMicUp()
-                                }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
+                        .background(WarmCoral)
                 ) {
-                    Icon(Icons.Filled.Mic, contentDescription = "按住说话", tint = if (listening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.Mic, contentDescription = "语音输入", tint = Color.White)
                 }
             } else {
                 IconButton(
