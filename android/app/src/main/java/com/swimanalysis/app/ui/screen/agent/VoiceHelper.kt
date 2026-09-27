@@ -34,7 +34,7 @@ class VoiceHelper(
             onError("当前设备不支持语音识别")
             return
         }
-        if (speechRecognizer != null) return
+        releaseRecognizer()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {}
@@ -43,7 +43,8 @@ class VoiceHelper(
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onError(error: Int) {
-                    onError("识别失败（错误码 $error）")
+                    releaseRecognizer()
+                    onError(mapError(error))
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -51,6 +52,7 @@ class VoiceHelper(
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
                         .orEmpty()
+                    releaseRecognizer()
                     if (text.isNotBlank()) onFinalResult(text)
                 }
 
@@ -76,14 +78,29 @@ class VoiceHelper(
 
     fun stopListening() {
         speechRecognizer?.stopListening()
-        speechRecognizer?.destroy()
-        speechRecognizer = null
     }
 
     fun cancelListening() {
         speechRecognizer?.cancel()
+        releaseRecognizer()
+    }
+
+    private fun releaseRecognizer() {
         speechRecognizer?.destroy()
         speechRecognizer = null
+    }
+
+    private fun mapError(code: Int): String = when (code) {
+        SpeechRecognizer.ERROR_NO_MATCH -> "没听清，请按住再说一次"
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "没有听到声音，请按住说话"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "缺少麦克风权限，请在系统设置中开启"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "语音服务忙，请稍后再试"
+        SpeechRecognizer.ERROR_NETWORK -> "网络异常，请检查网络后重试"
+        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时，请重试"
+        SpeechRecognizer.ERROR_AUDIO -> "录音出错，请重试"
+        SpeechRecognizer.ERROR_CLIENT -> "语音服务出错，请重试"
+        SpeechRecognizer.ERROR_SERVER -> "语音服务端出错，请重试"
+        else -> "识别失败（错误码 $code）"
     }
 
     fun speak(text: String) {
