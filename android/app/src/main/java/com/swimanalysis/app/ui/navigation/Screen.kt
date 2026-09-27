@@ -8,6 +8,7 @@ sealed class Screen(val route: String, val title: String) {
     data object Album : Screen("album", "相册")
     data object Profile : Screen("profile", "我的")
 
+    data object Chat : Screen("chat", "助手")
     data object Ledger : Screen("ledger", "账单")
     data object Stats : Screen("stats", "统计")
     data object AddEntry : Screen("add_entry?entryId={entryId}", "记一笔")

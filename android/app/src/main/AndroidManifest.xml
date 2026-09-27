@@ -59,6 +59,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name=".ui.screen.agent.ScheduleReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

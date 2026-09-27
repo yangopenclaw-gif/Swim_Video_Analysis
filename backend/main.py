@@ -22,6 +22,8 @@ import bcrypt
 import jwt
 
 from .swim_analyzer import SwimVideoAnalyzer
+from .agent_llm import chat as agent_llm_chat, default_provider as agent_default_provider
+from .agent_core import Tool, run_agent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -142,6 +144,59 @@ class ExchangeRate(Base):
     __tablename__ = "exchange_rates"
     currency = Column(String, primary_key=True)
     rate = Column(Float, nullable=False)
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(String, primary_key=True)
+    conversation_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class Memory(Base):
+    __tablename__ = "memories"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    mem_type = Column(String, default="semantic")
+    content = Column(Text, nullable=False)
+    importance = Column(Float, default=0.5)
+    created_at = Column(DateTime, default=datetime.now)
+    last_accessed_at = Column(DateTime, nullable=True)
+
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=True)
+    remind_at = Column(String, nullable=False)
+    repeat = Column(String, default="none")
+    enabled = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=True)
+    filename = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    chunk_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 LEDGER_CATEGORIES = {
@@ -2396,6 +2451,546 @@ async def update_rate(currency: str, request: Request, user_id: str = Depends(ge
         return {"status": "ok"}
     finally:
         db.close()
+
+
+# ============================================================
+# 个人智能体（Agent）：记忆 / 工具 / ReAct / 知识库 / 日程
+# ============================================================
+
+def build_system_prompt(memories: List[str], today_date: str) -> str:
+    mem_text = ""
+    if memories:
+        mem_text = "\n\n[关于用户的长期记忆（仅供参考）]\n" + "\n".join(f"- {m}" for m in memories)
+    return (
+        f"你是用户的个人专属智能体「小账」，一个温暖、贴心、简洁的私人助手。\n"
+        f"当前时间：{today_date}\n\n"
+        f"你的能力：\n"
+        f"1. 记账：用户说「记一笔/花了/赚了/买了/付了/收入/支出」等，用 ledger_add 记账；"
+        f"问「查账/账单/花了多少」用 ledger_query；问「汇总/统计/本月开销/结余」用 ledger_summary。\n"
+        f"2. 日程提醒：用户说「提醒我/几点/别忘了/日程」等，用 schedule_add；"
+        f"「我的提醒/有哪些提醒」用 schedule_list；「取消提醒/删除提醒」用 schedule_delete。\n"
+        f"3. 知识问答：记账、日程工具解决不了的知识类问题，用 kb_search 在个人知识库中检索。\n"
+        f"4. 闲聊：其他情况直接简洁友好地回复。\n\n"
+        f"注意事项：\n"
+        f"- 金额默认人民币 CNY，用户未说明日期用今天。\n"
+        f"- 回复用简体中文，简洁自然，像朋友聊天，不要冗长。\n"
+        f"- 涉及金额/时间务必准确，不要编造。"
+        f"{mem_text}"
+    )
+
+
+def _is_duplicate(text: str, existing: List[str]) -> bool:
+    def toks(s: str):
+        return set(c for c in s if c.strip())
+    t = toks(text)
+    if not t:
+        return True
+    for e in existing:
+        et = toks(e)
+        if not et:
+            continue
+        inter = len(t & et)
+        if inter / len(t) > 0.7 or inter / len(et) > 0.7:
+            return True
+    return False
+
+
+def recall_memories(user_id: str, query: str, top_k: int = 5) -> List[str]:
+    db = SessionLocal()
+    try:
+        memories = db.query(Memory).filter(Memory.user_id == user_id).all()
+    finally:
+        db.close()
+    if not memories:
+        return []
+    q_toks = set(c for c in query if c.strip())
+    scored = []
+    for m in memories:
+        m_toks = set(c for c in m.content if c.strip())
+        overlap = len(q_toks & m_toks) if q_toks and m_toks else 0
+        scored.append((overlap + (m.importance or 0.0) * 2, m.content))
+    scored.sort(key=lambda x: -x[0])
+    return [c for _, c in scored[:top_k]]
+
+
+async def extract_and_save_memories(user_id: str, user_text: str, assistant_text: str):
+    if not agent_default_provider():
+        return
+    prompt = (
+        f"从下面的对话中提取关于用户的稳定事实、偏好或值得长期记住的信息。\n"
+        f"只提取长期有用的信息（例如：用户的工作、兴趣、习惯、喜好、重要日期、财务目标等）。\n"
+        f"忽略一次性、琐碎的内容。\n\n"
+        f"用户说：{user_text}\n"
+        f"助手说：{assistant_text}\n\n"
+        f"只返回JSON数组，每项格式："
+        f'{{"type":"semantic|episodic|preference","content":"一句话描述","importance":0到1的小数}}。\n'
+        f"若没有值得记住的信息，返回空数组 []。"
+    )
+    try:
+        resp = await agent_llm_chat(
+            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=500
+        )
+        raw = resp.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            raw = raw.rsplit("```", 1)[0]
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            return
+        db = SessionLocal()
+        try:
+            existing = [m.content for m in db.query(Memory).filter(Memory.user_id == user_id).all()]
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                content = (it.get("content") or "").strip()
+                if not content:
+                    continue
+                try:
+                    imp = float(it.get("importance") or 0.5)
+                except (TypeError, ValueError):
+                    imp = 0.5
+                if imp < 0.5:
+                    continue
+                if _is_duplicate(content, existing):
+                    continue
+                db.add(Memory(
+                    id=str(uuid.uuid4()), user_id=user_id,
+                    mem_type=it.get("type") or "semantic",
+                    content=content, importance=imp
+                ))
+                existing.append(content)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("记忆提取失败: %s", e)
+
+
+def build_agent_tools(user_id: str) -> dict:
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    async def ledger_add(args):
+        entry_type = args.get("entry_type", "expense")
+        if entry_type not in ("expense", "income"):
+            entry_type = "expense"
+        try:
+            amount = float(args.get("amount", 0) or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount <= 0:
+            return {"error": "金额必须大于0"}
+        currency = str(args.get("currency") or "CNY").upper()
+        if currency not in CURRENCIES:
+            currency = "CNY"
+        amount_cny = round(amount * EXCHANGE_RATES.get(currency, 1.0), 2)
+        category = args.get("category") or "其他"
+        note = args.get("note") or ""
+        date = args.get("date") or today
+        entry_id = str(uuid.uuid4())
+        amounts_json = json.dumps(
+            [{"currency": currency, "amount": amount, "amount_cny": amount_cny}],
+            ensure_ascii=False
+        )
+        db = SessionLocal()
+        try:
+            db.add(LedgerEntry(
+                id=entry_id, entry_type=entry_type, amount=amount, category=category,
+                note=note or None, entry_date=date, currency=currency,
+                amount_cny=amount_cny, amounts=amounts_json, user_id=user_id
+            ))
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "ok", "message": f"已记账：{category} {amount} {currency}"}
+
+    async def ledger_query(args):
+        year = args.get("year")
+        month = args.get("month")
+        category = args.get("category")
+        entry_type = args.get("entry_type")
+        db = SessionLocal()
+        try:
+            q = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)
+            if year:
+                if month:
+                    q = q.filter(LedgerEntry.entry_date.like(f"{year}-{int(month):02d}-%"))
+                else:
+                    q = q.filter(LedgerEntry.entry_date.like(f"{year}-%"))
+            if category:
+                q = q.filter(LedgerEntry.category == category)
+            if entry_type in ("expense", "income"):
+                q = q.filter(LedgerEntry.entry_type == entry_type)
+            entries = q.order_by(LedgerEntry.entry_date.desc()).limit(50).all()
+            items = [
+                {"date": e.entry_date, "type": e.entry_type, "category": e.category,
+                 "amount": e.amount, "currency": e.currency or "CNY", "note": e.note or ""}
+                for e in entries
+            ]
+            total_cny = round(sum((e.amount_cny if e.amount_cny else e.amount) for e in entries), 2)
+            return {"count": len(items), "total_cny": total_cny, "items": items}
+        finally:
+            db.close()
+
+    async def ledger_summary(args):
+        year = args.get("year")
+        month = args.get("month")
+        db = SessionLocal()
+        try:
+            q = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)
+            if year:
+                if month:
+                    q = q.filter(LedgerEntry.entry_date.like(f"{year}-{int(month):02d}-%"))
+                else:
+                    q = q.filter(LedgerEntry.entry_date.like(f"{year}-%"))
+            entries = q.all()
+            expense_total = 0.0
+            income_total = 0.0
+            expense_map = {}
+            income_map = {}
+            for e in entries:
+                amt = e.amount_cny if e.amount_cny else e.amount
+                if e.entry_type == "expense":
+                    expense_total += amt
+                    expense_map[e.category] = expense_map.get(e.category, 0.0) + amt
+                else:
+                    income_total += amt
+                    income_map[e.category] = income_map.get(e.category, 0.0) + amt
+
+            def to_list(m):
+                return [{"category": k, "amount": round(v, 2)} for k, v in sorted(m.items(), key=lambda x: -x[1])]
+
+            return {
+                "expense_total": round(expense_total, 2),
+                "income_total": round(income_total, 2),
+                "balance": round(income_total - expense_total, 2),
+                "expense_by_category": to_list(expense_map),
+                "income_by_category": to_list(income_map),
+            }
+        finally:
+            db.close()
+
+    async def schedule_add(args):
+        title = (args.get("title") or "").strip()
+        remind_at = (args.get("remind_at") or "").strip()
+        if not title:
+            return {"error": "提醒标题不能为空"}
+        if not remind_at:
+            return {"error": "提醒时间不能为空"}
+        content = args.get("content") or ""
+        repeat = args.get("repeat") or "none"
+        sid = str(uuid.uuid4())
+        db = SessionLocal()
+        try:
+            db.add(Schedule(id=sid, user_id=user_id, title=title, content=content or None,
+                            remind_at=remind_at, repeat=repeat))
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "ok", "message": f"已添加提醒：{title}（{remind_at}）", "id": sid}
+
+    async def schedule_list(args):
+        db = SessionLocal()
+        try:
+            items = db.query(Schedule).filter(Schedule.user_id == user_id, Schedule.enabled == 1)\
+                .order_by(Schedule.remind_at.asc()).all()
+            return {"items": [{"id": s.id, "title": s.title, "content": s.content or "",
+                               "remind_at": s.remind_at, "repeat": s.repeat} for s in items]}
+        finally:
+            db.close()
+
+    async def schedule_delete(args):
+        sid = args.get("id")
+        title = args.get("title")
+        db = SessionLocal()
+        try:
+            if sid:
+                s = db.query(Schedule).filter(Schedule.id == sid, Schedule.user_id == user_id).first()
+            elif title:
+                s = db.query(Schedule).filter(Schedule.user_id == user_id, Schedule.title == title).first()
+            else:
+                s = None
+            if not s:
+                return {"error": "未找到该提醒"}
+            db.delete(s)
+            db.commit()
+            return {"status": "ok", "message": f"已删除提醒：{s.title}"}
+        finally:
+            db.close()
+
+    async def kb_search(args):
+        query = (args.get("query") or "").strip()
+        if not query:
+            return {"error": "查询内容不能为空"}
+        try:
+            from . import kb
+            chunks = kb.search(user_id, DATA_DIR, query, top_k=5)
+        except Exception as e:
+            return {"error": f"知识库检索失败: {e}"}
+        if not chunks:
+            return {"results": [], "message": "知识库中未找到相关内容"}
+        return {"results": chunks}
+
+    return {
+        "ledger_add": Tool(
+            "ledger_add", "新增一条记账记录",
+            {"type": "object", "properties": {
+                "entry_type": {"type": "string", "enum": ["expense", "income"], "description": "支出expense或收入income"},
+                "amount": {"type": "number", "description": "金额数字"},
+                "currency": {"type": "string", "description": "币种代码，默认CNY，可选CNY/USD/EUR/GBP/EGP/HKD/JPY"},
+                "category": {"type": "string", "description": "分类，支出：餐饮/交通/购物/居住/医疗/教育/娱乐/人情往来/自我消费/请客吃饭/AI/云机/其他；收入：工资/奖金/理财/红包/其他"},
+                "note": {"type": "string", "description": "备注"},
+                "date": {"type": "string", "description": "日期YYYY-MM-DD，默认今天"},
+            }, "required": ["entry_type", "amount"]},
+            ledger_add
+        ),
+        "ledger_query": Tool(
+            "ledger_query", "查询记账记录",
+            {"type": "object", "properties": {
+                "year": {"type": "string", "description": "年份，如2026"},
+                "month": {"type": "integer", "description": "月份1-12"},
+                "category": {"type": "string", "description": "按分类筛选"},
+                "entry_type": {"type": "string", "enum": ["expense", "income"], "description": "支出或收入"},
+            }},
+            ledger_query
+        ),
+        "ledger_summary": Tool(
+            "ledger_summary", "统计汇总支出/收入/结余",
+            {"type": "object", "properties": {
+                "year": {"type": "string", "description": "年份，如2026"},
+                "month": {"type": "integer", "description": "月份1-12"},
+            }},
+            ledger_summary
+        ),
+        "schedule_add": Tool(
+            "schedule_add", "添加一条日程/提醒",
+            {"type": "object", "properties": {
+                "title": {"type": "string", "description": "提醒标题"},
+                "content": {"type": "string", "description": "提醒内容备注"},
+                "remind_at": {"type": "string", "description": "提醒时间 YYYY-MM-DD HH:MM"},
+                "repeat": {"type": "string", "enum": ["none", "daily", "weekly"], "description": "重复方式，默认none"},
+            }, "required": ["title", "remind_at"]},
+            schedule_add
+        ),
+        "schedule_list": Tool(
+            "schedule_list", "查看用户的日程/提醒列表",
+            {"type": "object", "properties": {}},
+            schedule_list
+        ),
+        "schedule_delete": Tool(
+            "schedule_delete", "删除一条日程/提醒",
+            {"type": "object", "properties": {
+                "id": {"type": "string", "description": "提醒ID"},
+                "title": {"type": "string", "description": "提醒标题"},
+            }},
+            schedule_delete
+        ),
+        "kb_search": Tool(
+            "kb_search", "在个人知识库中检索相关内容",
+            {"type": "object", "properties": {
+                "query": {"type": "string", "description": "检索关键词或问题"},
+            }, "required": ["query"]},
+            kb_search
+        ),
+    }
+
+
+@app.post("/api/agent/chat")
+async def agent_chat(request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    text = (body.get("message") or body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+    conversation_id = body.get("conversation_id") or ""
+    today_date = datetime.now().strftime("%Y-%m-%d")
+
+    db = SessionLocal()
+    try:
+        if conversation_id:
+            conv = db.query(Conversation).filter(
+                Conversation.id == conversation_id, Conversation.user_id == user_id
+            ).first()
+            if not conv:
+                raise HTTPException(status_code=404, detail="会话不存在")
+        else:
+            conv = Conversation(id=str(uuid.uuid4()), user_id=user_id, title=text[:20])
+            db.add(conv)
+            db.commit()
+            conversation_id = conv.id
+        db.add(Message(id=str(uuid.uuid4()), conversation_id=conversation_id,
+                       user_id=user_id, role="user", content=text))
+        db.commit()
+        history = db.query(Message).filter(Message.conversation_id == conversation_id)\
+            .order_by(Message.created_at.asc()).all()
+        recent = history[-20:]
+    finally:
+        db.close()
+
+    memories = recall_memories(user_id, text, top_k=5)
+    system = build_system_prompt(memories, today_date)
+    messages = [{"role": "system", "content": system}]
+    for m in recent:
+        messages.append({"role": m.role, "content": m.content})
+
+    tools = build_agent_tools(user_id)
+
+    async def event_stream():
+        assistant_parts = []
+        yield f"data: {json.dumps({'type': 'meta', 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
+        try:
+            async for ev in run_agent(agent_llm_chat, messages, tools):
+                if ev["type"] == "token":
+                    assistant_parts.append(ev["text"])
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            assistant_text = "".join(assistant_parts)
+            db = SessionLocal()
+            try:
+                db.add(Message(id=str(uuid.uuid4()), conversation_id=conversation_id,
+                               user_id=user_id, role="assistant", content=assistant_text))
+                db.query(Conversation).filter(Conversation.id == conversation_id)\
+                    .update({Conversation.updated_at: datetime.now()})
+                db.commit()
+            finally:
+                db.close()
+            if assistant_text:
+                asyncio.create_task(extract_and_save_memories(user_id, text, assistant_text))
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/agent/conversations")
+async def agent_list_conversations(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        convs = db.query(Conversation).filter(Conversation.user_id == user_id)\
+            .order_by(Conversation.updated_at.desc()).all()
+        return {"items": [
+            {"id": c.id, "title": c.title or "新对话",
+             "updated_at": c.updated_at.strftime("%Y-%m-%d %H:%M:%S") if c.updated_at else None}
+            for c in convs
+        ]}
+    finally:
+        db.close()
+
+
+@app.get("/api/agent/conversations/{conversation_id}/messages")
+async def agent_get_messages(conversation_id: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        msgs = db.query(Message).filter(
+            Message.conversation_id == conversation_id, Message.user_id == user_id
+        ).order_by(Message.created_at.asc()).all()
+        return {"items": [{"role": m.role, "content": m.content} for m in msgs]}
+    finally:
+        db.close()
+
+
+@app.get("/api/agent/schedules")
+async def agent_list_schedules(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        items = db.query(Schedule).filter(Schedule.user_id == user_id, Schedule.enabled == 1)\
+            .order_by(Schedule.remind_at.asc()).all()
+        return {"items": [{"id": s.id, "title": s.title, "content": s.content or "",
+                           "remind_at": s.remind_at, "repeat": s.repeat} for s in items]}
+    finally:
+        db.close()
+
+
+@app.post("/api/agent/schedules")
+async def agent_create_schedule(request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    remind_at = (body.get("remind_at") or "").strip()
+    if not title or not remind_at:
+        raise HTTPException(status_code=400, detail="标题和提醒时间不能为空")
+    content = body.get("content") or ""
+    repeat = body.get("repeat") or "none"
+    sid = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(Schedule(id=sid, user_id=user_id, title=title, content=content or None,
+                        remind_at=remind_at, repeat=repeat))
+        db.commit()
+        return {"status": "ok", "id": sid}
+    finally:
+        db.close()
+
+
+@app.delete("/api/agent/schedules/{schedule_id}")
+async def agent_delete_schedule(schedule_id: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        s = db.query(Schedule).filter(Schedule.id == schedule_id, Schedule.user_id == user_id).first()
+        if not s:
+            raise HTTPException(status_code=404, detail="提醒不存在")
+        db.delete(s)
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
+@app.post("/api/agent/kb/upload")
+async def agent_kb_upload(request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    title = (body.get("title") or "未命名文档").strip()
+    content = body.get("content") or ""
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="内容不能为空")
+    from . import kb
+    chunks = kb.chunk_text(content)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="无法解析出有效内容")
+    doc_id = str(uuid.uuid4())
+    try:
+        n = kb.add_chunks(user_id, DATA_DIR, doc_id, title, chunks)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"知识库写入失败（embedding 模型未就绪？）: {e}")
+    db = SessionLocal()
+    try:
+        db.add(Document(id=doc_id, user_id=user_id, title=title, content=content, chunk_count=n))
+        db.commit()
+    finally:
+        db.close()
+    return {"status": "ok", "id": doc_id, "chunk_count": n}
+
+
+@app.get("/api/agent/kb/documents")
+async def agent_kb_documents(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        docs = db.query(Document).filter(Document.user_id == user_id)\
+            .order_by(Document.created_at.desc()).all()
+        return {"items": [
+            {"id": d.id, "title": d.title, "chunk_count": d.chunk_count,
+             "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None}
+            for d in docs
+        ]}
+    finally:
+        db.close()
+
+
+@app.delete("/api/agent/kb/documents/{doc_id}")
+async def agent_kb_delete(doc_id: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        d = db.query(Document).filter(Document.id == doc_id, Document.user_id == user_id).first()
+        if not d:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        db.delete(d)
+        db.commit()
+    finally:
+        db.close()
+    try:
+        from . import kb
+        kb.delete_doc(user_id, DATA_DIR, doc_id)
+    except Exception as e:
+        logger.warning("删除向量失败: %s", e)
+    return {"status": "ok"}
 
 
 if os.path.exists(FRONTEND_DIST):

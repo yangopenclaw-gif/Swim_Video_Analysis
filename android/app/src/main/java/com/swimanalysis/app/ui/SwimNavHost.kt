@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -40,6 +41,7 @@ import com.swimanalysis.app.album.AlbumScreen
 import com.swimanalysis.app.ui.screen.ledger.AddEntryScreen
 import com.swimanalysis.app.ui.screen.ledger.LedgerScreen
 import com.swimanalysis.app.ui.screen.ledger.StatsScreen
+import com.swimanalysis.app.ui.screen.agent.ChatScreen
 
 private data class BottomItem(
     val screen: Screen,
@@ -48,6 +50,7 @@ private data class BottomItem(
 )
 
 private val bottomItems = listOf(
+    BottomItem(Screen.Chat, Icons.Filled.SmartToy, "助手"),
     BottomItem(Screen.Stats, Icons.Outlined.Analytics, "统计"),
     BottomItem(Screen.Ledger, Icons.Filled.ReceiptLong, "账单"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
@@ -90,9 +93,10 @@ fun SwimNavHost() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Stats.route,
+            startDestination = Screen.Chat.route,
             modifier = Modifier.padding(innerPadding)
         ) {
+            composable(Screen.Chat.route) { ChatScreen(navController) }
             composable(Screen.Ledger.route) { LedgerScreen(navController) }
             composable(Screen.Stats.route) { StatsScreen() }
             composable(Screen.AddEntry.route) { AddEntryScreen(navController) }
