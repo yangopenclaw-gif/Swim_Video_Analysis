@@ -22,7 +22,7 @@ import bcrypt
 import jwt
 
 from .swim_analyzer import SwimVideoAnalyzer
-from .agent_llm import chat as agent_llm_chat, default_provider as agent_default_provider
+from .agent_llm import chat as agent_llm_chat, stream_chat as agent_llm_stream, default_provider as agent_default_provider
 from .agent_core import Tool, run_agent
 
 logging.basicConfig(level=logging.INFO)
@@ -2501,24 +2501,13 @@ async def update_rate(currency: str, request: Request, user_id: str = Depends(ge
 def build_system_prompt(memories: List[str], today_date: str) -> str:
     mem_text = ""
     if memories:
-        mem_text = "\n\n[关于用户的长期记忆（仅供参考）]\n" + "\n".join(f"- {m}" for m in memories)
+        mem_text = "\n[关于用户的长期记忆]\n" + "\n".join(f"- {m}" for m in memories)
     return (
-        f"你是用户的个人专属智能体「小咩」，一个温暖、贴心、简洁的私人助手。\n"
-        f"当前时间：{today_date}\n\n"
-        f"你的能力：\n"
-        f"1. 记账：用户说「记一笔/花了/赚了/买了/付了/收入/支出」等，用 ledger_add 记账；"
-        f"问「查账/账单/花了多少」用 ledger_query；问「汇总/统计/本月开销/结余」用 ledger_summary。\n"
-        f"2. 日程提醒：用户说「提醒我/几点/别忘了/日程」等，用 schedule_add；"
-        f"「我的提醒/有哪些提醒」用 schedule_list；「取消提醒/删除提醒」用 schedule_delete。\n"
-        f"3. 知识存储：用户告诉你值得长期记住的知识、事实、偏好（如「记住：我爱吃辣」「我的公司是XX」），用 kb_add 存入个人知识库；"
-        f"知识类问题用 kb_search 检索个人知识库。\n"
-        f"4. 记录本：用户说「记一下/记录/备忘」等重要事情，用 note_add 按日期记到记录本；"
-        f"「我的记录/记录本」用 note_list 查看。\n"
-        f"5. 闲聊：其他情况直接简洁友好地回复。\n\n"
-        f"注意事项：\n"
-        f"- 金额默认人民币 CNY，用户未说明日期用今天。\n"
-        f"- 回复用简体中文，简洁自然，像朋友聊天，不要冗长。\n"
-        f"- 涉及金额/时间务必准确，不要编造。"
+        f"你是用户的私人智能体「小咩」，温暖简洁。今天：{today_date}。\n"
+        f"工具：记账 ledger_add/ledger_query/ledger_summary；"
+        f"提醒 schedule_add/schedule_list/schedule_delete；"
+        f"知识 kb_add/kb_search；记录本 note_add/note_list。\n"
+        f"规则：金额默认 CNY，未说日期用今天；用简体中文简洁回复；涉及金额时间务必准确。"
         f"{mem_text}"
     )
 
@@ -2951,7 +2940,7 @@ async def agent_chat(request: Request, user_id: str = Depends(get_current_user_i
         assistant_parts = []
         yield f"data: {json.dumps({'type': 'meta', 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
         try:
-            async for ev in run_agent(agent_llm_chat, messages, tools):
+            async for ev in run_agent(agent_llm_stream, messages, tools):
                 if ev["type"] == "token":
                     assistant_parts.append(ev["text"])
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"

@@ -39,18 +39,18 @@ async def _call_handler(handler: Callable[[Dict[str, Any]], Any], args: Dict[str
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
-def _chunk(text: str, size: int = 12) -> List[str]:
-    return [text[i:i + size] for i in range(0, len(text), size)]
-
-
 async def run_agent(
-    llm_chat: Callable[..., Awaitable[Any]],
+    llm_stream: Callable[..., Any],
     messages: List[Dict[str, Any]],
     tools: Dict[str, Tool],
     *,
     max_iterations: int = 5,
 ) -> AsyncIterator[Dict[str, Any]]:
-    """Run the ReAct loop, yielding event dicts.
+    """Run the ReAct loop over a streaming LLM, yielding event dicts.
+
+    `llm_stream(messages, tools=...)` 应是一个异步迭代器，yield：
+      {"content": <增量文本>}  以及最终的
+      {"done": True, "tool_calls": [...], "content_full": <文本>}
 
     Events:
       {"type": "status", "text": ...}
@@ -60,19 +60,28 @@ async def run_agent(
       {"type": "error", "text": ...}
     """
     tool_specs = [t.to_openai() for t in tools.values()]
-    final_text = ""
 
     try:
         for _ in range(max_iterations):
-            resp = await llm_chat(messages, tools=tool_specs)
+            content_parts: List[str] = []
+            final_tool_calls: List[Dict[str, Any]] = []
 
-            if resp.tool_calls:
+            async for ev in llm_stream(messages, tools=tool_specs):
+                if ev.get("content"):
+                    content_parts.append(ev["content"])
+                    yield {"type": "token", "text": ev["content"]}
+                if ev.get("done"):
+                    final_tool_calls = ev.get("tool_calls") or []
+                    break
+
+            if final_tool_calls:
+                content = "".join(content_parts)
                 messages.append({
                     "role": "assistant",
-                    "content": resp.content or None,
-                    "tool_calls": resp.tool_calls,
+                    "content": content or None,
+                    "tool_calls": final_tool_calls,
                 })
-                for tc in resp.tool_calls:
+                for tc in final_tool_calls:
                     fn = tc.get("function", {})
                     name = fn.get("name", "")
                     raw_args = fn.get("arguments", "{}") or "{}"
@@ -100,15 +109,12 @@ async def run_agent(
                     })
                 continue
 
-            final_text = resp.content or ""
-            break
-
-        if not final_text:
-            final_text = "抱歉，我暂时无法处理这个请求，请换个说法试试。"
-
-        for chunk in _chunk(final_text):
-            yield {"type": "token", "text": chunk}
-        yield {"type": "done"}
+            final_text = "".join(content_parts)
+            if not final_text:
+                final_text = "抱歉，我暂时无法处理这个请求，请换个说法试试。"
+                yield {"type": "token", "text": final_text}
+            yield {"type": "done"}
+            return
     except Exception as e:
         logger.exception("agent run failed")
         yield {"type": "error", "text": str(e)}
