@@ -107,3 +107,8 @@ data class NoteCreateRequest(
     val content: String = "",
     val date: String = ""
 )
+@Serializable
+data class ImageExtractResponse(
+    val status: String = "",
+    val text: String = ""
+)

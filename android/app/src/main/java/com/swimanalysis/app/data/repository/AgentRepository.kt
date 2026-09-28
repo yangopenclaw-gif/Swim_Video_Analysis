@@ -1,5 +1,7 @@
 package com.swimanalysis.app.data.repository
 
+import android.content.Context
+import android.net.Uri
 import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.data.api.AgentApi
 import com.swimanalysis.app.data.model.AgentChatRequest
@@ -7,6 +9,7 @@ import com.swimanalysis.app.data.model.ChatEvent
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -14,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -24,7 +28,8 @@ import javax.inject.Singleton
 class AgentRepository @Inject constructor(
     private val api: AgentApi,
     private val client: OkHttpClient,
-    private val json: Json
+    private val json: Json,
+    @ApplicationContext private val context: Context
 ) {
     suspend fun listConversations() = api.listConversations().items
 
@@ -43,6 +48,23 @@ class AgentRepository @Inject constructor(
         api.uploadDocument(KbUploadRequest(title, content))
 
     suspend fun deleteDocument(id: String) = api.deleteDocument(id)
+
+    suspend fun extractImage(uri: Uri): String = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri) ?: "image/jpeg"
+        val ext = when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            mime.contains("bmp") -> "bmp"
+            else -> "jpg"
+        }
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IllegalStateException("无法读取图片")
+        val part = MultipartBody.Part.createFormData(
+            "file", "image.$ext", bytes.toRequestBody(mime.toMediaType())
+        )
+        api.extractImage(part).text
+    }
 
     suspend fun listNotes() = api.listNotes().items
 

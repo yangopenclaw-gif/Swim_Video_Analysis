@@ -3036,6 +3036,45 @@ async def agent_delete_schedule(schedule_id: str, user_id: str = Depends(get_cur
         db.close()
 
 
+@app.post("/api/agent/kb/extract_image")
+async def agent_kb_extract_image(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+    if not LLM_API_KEY:
+        raise HTTPException(status_code=500, detail="未配置LLM API密钥")
+    import base64
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="图片内容为空")
+    b64 = base64.b64encode(content).decode()
+    ext = os.path.splitext(file.filename or ".jpg")[1].lower()
+    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".bmp": "image/bmp"}
+    mime = mime_map.get(ext, "image/jpeg")
+    import httpx
+    prompt = """请仔细查看这张图片，提炼其中的关键信息，用简体中文、结构化要点形式整理输出。
+若是票据/文档/截图，请尽量完整还原其中的重要文字信息并归类整理；若是照片，请概括主要内容。
+直接输出整理后的文本内容，不要加任何解释性前缀或后缀。"""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            messages = [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+            ]}]
+            resp = await client.post(
+                f"{LLM_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+                json={"model": LLM_MODEL, "messages": messages, "temperature": 0.2}
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"LLM API调用失败: {resp.status_code}")
+            data = resp.json()
+            text = (data["choices"][0]["message"]["content"] or "").strip()
+            return {"status": "ok", "text": text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Image extract error: {e}")
+        raise HTTPException(status_code=500, detail=f"图片信息抽取失败: {str(e)}")
+
+
 @app.post("/api/agent/kb/upload")
 async def agent_kb_upload(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()

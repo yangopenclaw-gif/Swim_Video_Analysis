@@ -2,6 +2,7 @@ package com.swimanalysis.app.data.api
 
 import com.swimanalysis.app.data.model.ConversationListResponse
 import com.swimanalysis.app.data.model.DocumentListResponse
+import com.swimanalysis.app.data.model.ImageExtractResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.KbUploadResponse
 import com.swimanalysis.app.data.model.MessageListResponse
@@ -9,11 +10,14 @@ import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.NoteListResponse
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import com.swimanalysis.app.data.model.ScheduleListResponse
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 
 interface AgentApi {
@@ -35,6 +39,10 @@ interface AgentApi {
 
     @POST("/api/agent/kb/upload")
     suspend fun uploadDocument(@Body body: KbUploadRequest): KbUploadResponse
+
+    @Multipart
+    @POST("/api/agent/kb/extract_image")
+    suspend fun extractImage(@Part file: MultipartBody.Part): ImageExtractResponse
 
     @GET("/api/agent/kb/documents")
     suspend fun listDocuments(): DocumentListResponse

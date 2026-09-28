@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,7 +42,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -81,9 +86,15 @@ fun ChatScreen(
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
             if (!text.isNullOrBlank()) {
-                viewModel.send(text)
+                inputText = text
             }
         }
+    }
+
+    val imageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) viewModel.extractImage(uri)
     }
 
     fun launchVoice() {
@@ -166,9 +177,23 @@ fun ChatScreen(
                     inputText = ""
                 },
                 onMic = { launchVoice() },
+                onImage = { imageLauncher.launch("image/*") },
                 onStopStreaming = { viewModel.stopStreaming() }
             )
         }
+    }
+
+    if (state.imageExtracting || state.extractedText.isNotBlank() || state.imageError != null) {
+        ImageExtractDialog(
+            extracting = state.imageExtracting,
+            title = state.extractedTitle,
+            text = state.extractedText,
+            error = state.imageError,
+            onTitleChange = viewModel::setExtractedTitle,
+            onTextChange = viewModel::setExtractedText,
+            onSave = viewModel::saveExtractedToKb,
+            onDismiss = viewModel::dismissImageResult
+        )
     }
 }
 
@@ -293,6 +318,7 @@ private fun InputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMic: () -> Unit,
+    onImage: () -> Unit,
     onStopStreaming: () -> Unit
 ) {
     Column(
@@ -322,6 +348,13 @@ private fun InputBar(
                 shape = RoundedCornerShape(24.dp)
             )
             Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = onImage,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Icon(Icons.Filled.AddPhotoAlternate, contentDescription = "上传图片识别入库", tint = WarmCoral)
+            }
+            Spacer(Modifier.width(4.dp))
             if (isSending) {
                 IconButton(
                     onClick = onStopStreaming,
@@ -351,6 +384,79 @@ private fun InputBar(
                         .background(WarmCoral)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送", tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageExtractDialog(
+    extracting: Boolean,
+    title: String,
+    text: String,
+    error: String?,
+    onTitleChange: (String) -> Unit,
+    onTextChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text("图片转知识", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "已从图片中提炼信息，可编辑后加入知识库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (extracting) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("正在识别图片…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = onTitleChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("标题（可选）") },
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = onTextChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("抽取的内容") },
+                        minLines = 4,
+                        maxLines = 8
+                    )
+                    error?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = onSave) { Text("添加到知识库") }
+                    }
                 }
             }
         }

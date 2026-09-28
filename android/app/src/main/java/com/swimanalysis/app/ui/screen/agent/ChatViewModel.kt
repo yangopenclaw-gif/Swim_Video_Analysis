@@ -1,5 +1,6 @@
 package com.swimanalysis.app.ui.screen.agent
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.repository.AgentRepository
@@ -22,7 +23,11 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val streamingText: String = "",
     val statusText: String = "",
-    val error: String? = null
+    val error: String? = null,
+    val imageExtracting: Boolean = false,
+    val extractedTitle: String = "",
+    val extractedText: String = "",
+    val imageError: String? = null
 )
 
 @HiltViewModel
@@ -35,6 +40,7 @@ class ChatViewModel @Inject constructor(
 
     private var conversationId: String? = null
     private var streamJob: Job? = null
+    private var imageJob: Job? = null
 
     init {
         loadLatestConversation()
@@ -120,4 +126,44 @@ class ChatViewModel @Inject constructor(
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    fun extractImage(uri: Uri) {
+        if (_state.value.imageExtracting) return
+        _state.update { it.copy(imageExtracting = true, imageError = null) }
+        imageJob = viewModelScope.launch {
+            try {
+                val text = repository.extractImage(uri)
+                _state.update { it.copy(imageExtracting = false, extractedText = text, extractedTitle = "") }
+            } catch (e: Exception) {
+                _state.update { it.copy(imageExtracting = false, imageError = e.message) }
+            }
+        }
+    }
+
+    fun setExtractedTitle(text: String) = _state.update { it.copy(extractedTitle = text) }
+    fun setExtractedText(text: String) = _state.update { it.copy(extractedText = text) }
+
+    fun saveExtractedToKb() {
+        val title = _state.value.extractedTitle.trim()
+        val content = _state.value.extractedText.trim()
+        if (content.isEmpty()) {
+            _state.update { it.copy(imageError = "抽取内容为空") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                repository.uploadDocument(title.ifBlank { "图片信息" }, content)
+                _state.update { it.copy(extractedTitle = "", extractedText = "", imageError = null) }
+            } catch (e: Exception) {
+                _state.update { it.copy(imageError = e.message) }
+            }
+        }
+    }
+
+    fun dismissImageResult() {
+        imageJob?.cancel()
+        _state.update {
+            it.copy(imageExtracting = false, extractedTitle = "", extractedText = "", imageError = null)
+        }
+    }
 }
