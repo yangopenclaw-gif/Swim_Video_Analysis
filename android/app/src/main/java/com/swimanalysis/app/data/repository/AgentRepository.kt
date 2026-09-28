@@ -5,6 +5,7 @@ import com.swimanalysis.app.data.api.AgentApi
 import com.swimanalysis.app.data.model.AgentChatRequest
 import com.swimanalysis.app.data.model.ChatEvent
 import com.swimanalysis.app.data.model.KbUploadRequest
+import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +44,16 @@ class AgentRepository @Inject constructor(
 
     suspend fun deleteDocument(id: String) = api.deleteDocument(id)
 
+    suspend fun listNotes() = api.listNotes().items
+
+    suspend fun createNote(title: String, content: String, date: String) =
+        api.createNote(NoteCreateRequest(title, content, date))
+
+    suspend fun updateNote(id: String, title: String, content: String, date: String) =
+        api.updateNote(id, NoteCreateRequest(title, content, date))
+
+    suspend fun deleteNote(id: String) = api.deleteNote(id)
+
     fun streamChat(message: String, conversationId: String?): Flow<ChatEvent> = flow {
         val requestBody = json.encodeToString(AgentChatRequest(message, conversationId))
             .toRequestBody("application/json".toMediaType())
@@ -67,7 +78,6 @@ class AgentRepository @Inject constructor(
                         try {
                             emit(json.decodeFromString(ChatEvent.serializer(), payload))
                         } catch (_: Exception) {
-                            // 忽略无法解析的行
                         }
                     }
                 }

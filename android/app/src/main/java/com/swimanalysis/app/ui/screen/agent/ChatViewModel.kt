@@ -2,7 +2,6 @@ package com.swimanalysis.app.ui.screen.agent
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.swimanalysis.app.data.model.ScheduleDto
 import com.swimanalysis.app.data.repository.AgentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -23,8 +22,6 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val streamingText: String = "",
     val statusText: String = "",
-    val autoSpeak: Boolean = true,
-    val spokenAssistantContent: String? = null,
     val error: String? = null
 )
 
@@ -38,6 +35,31 @@ class ChatViewModel @Inject constructor(
 
     private var conversationId: String? = null
     private var streamJob: Job? = null
+
+    init {
+        loadLatestConversation()
+    }
+
+    private fun loadLatestConversation() {
+        viewModelScope.launch {
+            try {
+                val convs = repository.listConversations()
+                if (convs.isNotEmpty()) {
+                    val latest = convs.first()
+                    conversationId = latest.id
+                    val msgs = repository.getMessages(latest.id)
+                    _state.update { it.copy(messages = msgs.map { m -> ChatUiMessage(m.role, m.content) }) }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun newConversation() {
+        streamJob?.cancel()
+        conversationId = null
+        _state.update { ChatUiState() }
+    }
 
     fun send(text: String) {
         val trimmed = text.trim()
@@ -97,7 +119,5 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun toggleAutoSpeak() = _state.update { it.copy(autoSpeak = !it.autoSpeak) }
-    fun markSpoken(content: String) = _state.update { it.copy(spokenAssistantContent = content) }
     fun clearError() = _state.update { it.copy(error = null) }
 }

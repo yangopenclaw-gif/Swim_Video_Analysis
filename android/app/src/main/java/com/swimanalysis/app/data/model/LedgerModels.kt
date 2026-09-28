@@ -105,3 +105,14 @@ data class ParseVoiceResponse(
     val status: String = "",
     val data: VoiceParseData = VoiceParseData()
 )
+@Serializable
+data class CalendarDayDto(
+    val date: String = "",
+    val expense: Double = 0.0,
+    val income: Double = 0.0
+)
+
+@Serializable
+data class CalendarResponse(
+    val items: List<CalendarDayDto> = emptyList()
+)

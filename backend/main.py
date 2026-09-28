@@ -199,6 +199,17 @@ class Document(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class Note(Base):
+    __tablename__ = "notes"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=True)
+    note_date = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 LEDGER_CATEGORIES = {
     "expense": ["自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "AI", "云机", "其他"],
     "income": ["工资", "奖金", "理财", "红包", "其他"]
@@ -2233,6 +2244,36 @@ async def ledger_summary(year: Optional[str] = None, month: Optional[str] = None
         db.close()
 
 
+@app.get("/api/ledger/calendar")
+async def ledger_calendar(year: Optional[str] = None, month: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        q = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)
+        if year:
+            if month:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-{month:0>2}-%"))
+            else:
+                q = q.filter(LedgerEntry.entry_date.like(f"{year}-%"))
+        entries = q.all()
+        daily = {}
+        for e in entries:
+            amt = e.amount_cny if e.amount_cny else e.amount
+            day = e.entry_date
+            if day not in daily:
+                daily[day] = {"date": day, "expense": 0.0, "income": 0.0}
+            if e.entry_type == "expense":
+                daily[day]["expense"] += amt
+            else:
+                daily[day]["income"] += amt
+        items = []
+        for d in sorted(daily.keys()):
+            v = daily[d]
+            items.append({"date": d, "expense": round(v["expense"], 2), "income": round(v["income"], 2)})
+        return {"items": items}
+    finally:
+        db.close()
+
+
 @app.post("/api/ledger/parse_voice")
 async def parse_voice(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
@@ -2462,15 +2503,18 @@ def build_system_prompt(memories: List[str], today_date: str) -> str:
     if memories:
         mem_text = "\n\n[关于用户的长期记忆（仅供参考）]\n" + "\n".join(f"- {m}" for m in memories)
     return (
-        f"你是用户的个人专属智能体「小账」，一个温暖、贴心、简洁的私人助手。\n"
+        f"你是用户的个人专属智能体「小咩」，一个温暖、贴心、简洁的私人助手。\n"
         f"当前时间：{today_date}\n\n"
         f"你的能力：\n"
         f"1. 记账：用户说「记一笔/花了/赚了/买了/付了/收入/支出」等，用 ledger_add 记账；"
         f"问「查账/账单/花了多少」用 ledger_query；问「汇总/统计/本月开销/结余」用 ledger_summary。\n"
         f"2. 日程提醒：用户说「提醒我/几点/别忘了/日程」等，用 schedule_add；"
         f"「我的提醒/有哪些提醒」用 schedule_list；「取消提醒/删除提醒」用 schedule_delete。\n"
-        f"3. 知识问答：记账、日程工具解决不了的知识类问题，用 kb_search 在个人知识库中检索。\n"
-        f"4. 闲聊：其他情况直接简洁友好地回复。\n\n"
+        f"3. 知识存储：用户告诉你值得长期记住的知识、事实、偏好（如「记住：我爱吃辣」「我的公司是XX」），用 kb_add 存入个人知识库；"
+        f"知识类问题用 kb_search 检索个人知识库。\n"
+        f"4. 记录本：用户说「记一下/记录/备忘」等重要事情，用 note_add 按日期记到记录本；"
+        f"「我的记录/记录本」用 note_list 查看。\n"
+        f"5. 闲聊：其他情况直接简洁友好地回复。\n\n"
         f"注意事项：\n"
         f"- 金额默认人民币 CNY，用户未说明日期用今天。\n"
         f"- 回复用简体中文，简洁自然，像朋友聊天，不要冗长。\n"
@@ -2731,6 +2775,53 @@ def build_agent_tools(user_id: str) -> dict:
             return {"results": [], "message": "知识库中未找到相关内容"}
         return {"results": chunks}
 
+    async def kb_add(args):
+        title = (args.get("title") or "知识").strip()
+        content = (args.get("content") or "").strip()
+        if not content:
+            return {"error": "内容不能为空"}
+        try:
+            from . import kb
+            chunks = kb.chunk_text(content)
+            if not chunks:
+                return {"error": "无法解析出有效内容"}
+            doc_id = str(uuid.uuid4())
+            n = kb.add_chunks(user_id, DATA_DIR, doc_id, title, chunks)
+        except Exception as e:
+            return {"error": f"知识存储失败: {e}"}
+        db = SessionLocal()
+        try:
+            db.add(Document(id=doc_id, user_id=user_id, title=title, content=content, chunk_count=n))
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "ok", "message": f"已记住：{title}"}
+
+    async def note_add(args):
+        title = (args.get("title") or "").strip()
+        content = (args.get("content") or "").strip()
+        if not title:
+            return {"error": "标题不能为空"}
+        note_date = args.get("date") or today
+        nid = str(uuid.uuid4())
+        db = SessionLocal()
+        try:
+            db.add(Note(id=nid, user_id=user_id, title=title, content=content or None, note_date=note_date))
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "ok", "message": f"已记录：{title}（{note_date}）", "id": nid}
+
+    async def note_list(args):
+        db = SessionLocal()
+        try:
+            items = db.query(Note).filter(Note.user_id == user_id)\
+                .order_by(Note.note_date.desc()).limit(50).all()
+            return {"items": [{"id": n.id, "title": n.title, "content": n.content or "",
+                               "date": n.note_date} for n in items]}
+        finally:
+            db.close()
+
     return {
         "ledger_add": Tool(
             "ledger_add", "新增一条记账记录",
@@ -2791,6 +2882,28 @@ def build_agent_tools(user_id: str) -> dict:
                 "query": {"type": "string", "description": "检索关键词或问题"},
             }, "required": ["query"]},
             kb_search
+        ),
+        "kb_add": Tool(
+            "kb_add", "将用户告知的知识/事实/偏好存入个人知识库",
+            {"type": "object", "properties": {
+                "title": {"type": "string", "description": "知识标题"},
+                "content": {"type": "string", "description": "知识内容"},
+            }, "required": ["title", "content"]},
+            kb_add
+        ),
+        "note_add": Tool(
+            "note_add", "按日期记一条重要事情到记录本",
+            {"type": "object", "properties": {
+                "title": {"type": "string", "description": "标题"},
+                "content": {"type": "string", "description": "详细内容"},
+                "date": {"type": "string", "description": "日期YYYY-MM-DD，默认今天"},
+            }, "required": ["title"]},
+            note_add
+        ),
+        "note_list": Tool(
+            "note_list", "查看记录本中的记录列表",
+            {"type": "object", "properties": {}},
+            note_list
         ),
     }
 
@@ -2991,6 +3104,74 @@ async def agent_kb_delete(doc_id: str, user_id: str = Depends(get_current_user_i
     except Exception as e:
         logger.warning("删除向量失败: %s", e)
     return {"status": "ok"}
+
+
+@app.get("/api/agent/notes")
+async def agent_list_notes(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        items = db.query(Note).filter(Note.user_id == user_id)\
+            .order_by(Note.note_date.desc(), Note.created_at.desc()).all()
+        return {"items": [
+            {"id": n.id, "title": n.title, "content": n.content or "",
+             "date": n.note_date,
+             "created_at": n.created_at.strftime("%Y-%m-%d %H:%M:%S") if n.created_at else None}
+            for n in items
+        ]}
+    finally:
+        db.close()
+
+
+@app.post("/api/agent/notes")
+async def agent_create_note(request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    content = body.get("content") or ""
+    note_date = (body.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
+    nid = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(Note(id=nid, user_id=user_id, title=title, content=content or None, note_date=note_date))
+        db.commit()
+        return {"status": "ok", "id": nid}
+    finally:
+        db.close()
+
+
+@app.put("/api/agent/notes/{note_id}")
+async def agent_update_note(note_id: str, request: Request, user_id: str = Depends(get_current_user_id)):
+    body = await request.json()
+    db = SessionLocal()
+    try:
+        n = db.query(Note).filter(Note.id == note_id, Note.user_id == user_id).first()
+        if not n:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        if "title" in body:
+            n.title = (body["title"] or "").strip() or n.title
+        if "content" in body:
+            n.content = body["content"]
+        if "date" in body:
+            n.note_date = (body["date"] or n.note_date).strip()
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
+@app.delete("/api/agent/notes/{note_id}")
+async def agent_delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        n = db.query(Note).filter(Note.id == note_id, Note.user_id == user_id).first()
+        if not n:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        db.delete(n)
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
 
 
 if os.path.exists(FRONTEND_DIST):

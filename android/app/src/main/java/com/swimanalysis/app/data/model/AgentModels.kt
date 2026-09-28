@@ -87,3 +87,23 @@ data class KbUploadResponse(
     val id: String = "",
     @SerialName("chunk_count") val chunkCount: Int = 0
 )
+@Serializable
+data class NoteDto(
+    val id: String = "",
+    val title: String = "",
+    val content: String = "",
+    val date: String = "",
+    @SerialName("created_at") val createdAt: String? = null
+)
+
+@Serializable
+data class NoteListResponse(
+    val items: List<NoteDto> = emptyList()
+)
+
+@Serializable
+data class NoteCreateRequest(
+    val title: String,
+    val content: String = "",
+    val date: String = ""
+)

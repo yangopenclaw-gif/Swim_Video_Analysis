@@ -4,6 +4,7 @@ import com.swimanalysis.app.data.api.LedgerApi
 import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.AuthRequest
 import com.swimanalysis.app.data.model.AuthResponse
+import com.swimanalysis.app.data.model.CalendarResponse
 import com.swimanalysis.app.data.model.CreateLedgerEntryRequest
 import com.swimanalysis.app.data.model.CurrencyListResponse
 import com.swimanalysis.app.data.model.LedgerEntryDto
@@ -50,6 +51,9 @@ class LedgerRepository @Inject constructor(
 
     suspend fun getSummary(year: String?, month: String?): LedgerSummary =
         api.getSummary(year, month)
+
+    suspend fun getCalendar(year: String?, month: String?): CalendarResponse =
+        api.getCalendar(year, month)
 
     suspend fun parseVoice(text: String): ParseVoiceResponse =
         api.parseVoice(ParseVoiceRequest(text))

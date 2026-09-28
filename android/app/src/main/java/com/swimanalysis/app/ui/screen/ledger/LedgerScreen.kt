@@ -1,6 +1,7 @@
 package com.swimanalysis.app.ui.screen.ledger
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,10 +19,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,11 +62,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.swimanalysis.app.data.model.AmountItemDto
+import com.swimanalysis.app.data.model.CalendarDayDto
 import com.swimanalysis.app.data.model.LedgerEntryDto
 import com.swimanalysis.app.ui.theme.ExpenseRed
 import com.swimanalysis.app.ui.theme.IncomeGreen
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
+import java.time.YearMonth
 
 
 private fun formatAmount(value: Double): String {
@@ -85,6 +90,7 @@ fun LedgerScreen(
     var pendingEdit by remember { mutableStateOf<LedgerEntryDto?>(null) }
     var pendingDelete by remember { mutableStateOf<LedgerEntryDto?>(null) }
     var passwordInput by remember { mutableStateOf("") }
+    var selectedDate by remember { mutableStateOf<String?>(null) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -109,12 +115,20 @@ fun LedgerScreen(
                 actions = {
                     Text(
                         text = "${state.yearMonth.year}年${state.yearMonth.monthValue}月",
-                        modifier = Modifier.padding(end = 8.dp),
+                        modifier = Modifier.padding(end = 4.dp),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     IconButton(onClick = { viewModel.nextMonth() }) {
                         Icon(Icons.Filled.ChevronRight, contentDescription = "下月")
+                    }
+                    IconButton(onClick = {
+                        viewModel.setViewMode(if (state.viewMode == "list") "calendar" else "list")
+                    }) {
+                        Icon(
+                            if (state.viewMode == "list") Icons.Filled.CalendarMonth else Icons.Filled.ViewList,
+                            contentDescription = "切换视图"
+                        )
                     }
                 }
             )
@@ -142,6 +156,8 @@ fun LedgerScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) { Text("加载失败：${state.error}", color = MaterialTheme.colorScheme.error) }
+            } else if (state.viewMode == "calendar") {
+                CalendarView(state.yearMonth, state.calendar, onDayClick = { selectedDate = it })
             } else if (state.entries.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -178,6 +194,32 @@ fun LedgerScreen(
                 }
             }
         }
+    }
+
+    selectedDate?.let { date ->
+        val dayEntries = state.entries.filter { it.entryDate == date }
+        AlertDialog(
+            onDismissRequest = { selectedDate = null },
+            title = { Text("$date 明细") },
+            text = {
+                if (dayEntries.isEmpty()) {
+                    Text("当天无记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        dayEntries.forEach { e ->
+                            val isExpense = e.entryType != "income"
+                            val amt = if (e.amounts.isNotEmpty()) e.amounts.first().amount else e.amount
+                            val unit = if (e.currency == "CNY") "元" else LedgerCurrencies.name(e.currency)
+                            Text(
+                                "${e.category} ${if (isExpense) "-" else "+"}${formatAmount(amt)} $unit${if (e.note.isNotBlank()) " · ${e.note}" else ""}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedDate = null }) { Text("关闭") } }
+        )
     }
 
     if (pendingEdit != null || pendingDelete != null) {
@@ -245,6 +287,60 @@ fun LedgerScreen(
                 }) { Text("取消") }
             }
         )
+    }
+}
+
+@Composable
+private fun CalendarView(
+    yearMonth: YearMonth,
+    calendar: List<CalendarDayDto>,
+    onDayClick: (String) -> Unit
+) {
+    val daysInMonth = yearMonth.lengthOfMonth()
+    val firstDayOfWeek = yearMonth.atDay(1).dayOfWeek.value % 7
+    val totalCells = ((firstDayOfWeek + daysInMonth) + 6) / 7 * 7
+    val dailyMap = calendar.associateBy { it.date }
+    Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("日", "一", "二", "三", "四", "五", "六").forEach {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        for (week in 0 until totalCells step 7) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                for (i in 0 until 7) {
+                    val cell = week + i
+                    val dayNum = cell - firstDayOfWeek + 1
+                    if (dayNum in 1..daysInMonth) {
+                        val date = yearMonth.atDay(dayNum).toString()
+                        val day = dailyMap[date]
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .clickable { onDayClick(date) }
+                                .padding(2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(dayNum.toString(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                            if (day != null && day.expense > 0) {
+                                Text("-${formatAmount(day.expense)}", style = MaterialTheme.typography.labelSmall, color = ExpenseRed, maxLines = 1)
+                            }
+                            if (day != null && day.income > 0) {
+                                Text("+${formatAmount(day.income)}", style = MaterialTheme.typography.labelSmall, color = IncomeGreen, maxLines = 1)
+                            }
+                        }
+                    } else {
+                        Box(modifier = Modifier.weight(1f).height(58.dp))
+                    }
+                }
+            }
+        }
     }
 }
 

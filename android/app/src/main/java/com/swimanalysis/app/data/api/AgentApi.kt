@@ -5,12 +5,15 @@ import com.swimanalysis.app.data.model.DocumentListResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.KbUploadResponse
 import com.swimanalysis.app.data.model.MessageListResponse
+import com.swimanalysis.app.data.model.NoteCreateRequest
+import com.swimanalysis.app.data.model.NoteListResponse
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import com.swimanalysis.app.data.model.ScheduleListResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 
 interface AgentApi {
@@ -38,4 +41,16 @@ interface AgentApi {
 
     @DELETE("/api/agent/kb/documents/{id}")
     suspend fun deleteDocument(@Path("id") id: String): Map<String, String>
+
+    @GET("/api/agent/notes")
+    suspend fun listNotes(): NoteListResponse
+
+    @POST("/api/agent/notes")
+    suspend fun createNote(@Body body: NoteCreateRequest): Map<String, String>
+
+    @PUT("/api/agent/notes/{id}")
+    suspend fun updateNote(@Path("id") id: String, @Body body: NoteCreateRequest): Map<String, String>
+
+    @DELETE("/api/agent/notes/{id}")
+    suspend fun deleteNote(@Path("id") id: String): Map<String, String>
 }

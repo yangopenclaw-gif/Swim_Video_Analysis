@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.model.AmountItemDto
 import com.swimanalysis.app.data.model.LedgerEntryDto
+import com.swimanalysis.app.data.model.CalendarDayDto
 import com.swimanalysis.app.data.model.LedgerSummary
 import com.swimanalysis.app.data.local.AuthStore
 import com.swimanalysis.app.data.model.UpdateLedgerEntryRequest
@@ -42,6 +43,8 @@ data class LedgerUiState(
     val yearMonth: YearMonth = YearMonth.now(),
     val entries: List<LedgerEntryDto> = emptyList(),
     val summary: LedgerSummary = LedgerSummary(),
+    val calendar: List<CalendarDayDto> = emptyList(),
+    val viewMode: String = "list",
     val isLoading: Boolean = false,
     val error: String? = null
 )
@@ -73,12 +76,15 @@ class LedgerViewModel @Inject constructor(
             try {
                 val entries = repository.getEntries(ym.year.toString(), ym.monthValue.toString())
                 val summary = repository.getSummary(ym.year.toString(), ym.monthValue.toString())
-                _state.update { it.copy(isLoading = false, entries = entries, summary = summary) }
+                val calendar = repository.getCalendar(ym.year.toString(), ym.monthValue.toString()).items
+                _state.update { it.copy(isLoading = false, entries = entries, summary = summary, calendar = calendar) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
         }
     }
+
+    fun setViewMode(mode: String) = _state.update { it.copy(viewMode = mode) }
 
     fun prevMonth() {
         _state.update { it.copy(yearMonth = it.yearMonth.minusMonths(1)) }

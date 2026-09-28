@@ -2,6 +2,7 @@ package com.swimanalysis.app.data.api
 
 import com.swimanalysis.app.data.model.AuthRequest
 import com.swimanalysis.app.data.model.AuthResponse
+import com.swimanalysis.app.data.model.CalendarResponse
 import com.swimanalysis.app.data.model.CreateLedgerEntryRequest
 import com.swimanalysis.app.data.model.CurrencyListResponse
 import com.swimanalysis.app.data.model.LedgerEntryDto
@@ -42,6 +43,12 @@ interface LedgerApi {
         @Query("year") year: String?,
         @Query("month") month: String?
     ): LedgerSummary
+
+    @GET("/api/ledger/calendar")
+    suspend fun getCalendar(
+        @Query("year") year: String?,
+        @Query("month") month: String?
+    ): CalendarResponse
 
     @POST("/api/ledger/parse_voice")
     suspend fun parseVoice(@Body body: ParseVoiceRequest): ParseVoiceResponse

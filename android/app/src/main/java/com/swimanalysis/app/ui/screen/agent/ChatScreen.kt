@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,11 +29,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -44,7 +43,6 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -74,12 +72,6 @@ fun ChatScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
-    var showKbDialog by remember { mutableStateOf(false) }
-
-    val voiceHelper = remember { VoiceHelper(context = context) }
-    DisposableEffect(Unit) {
-        onDispose { voiceHelper.shutdown() }
-    }
 
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -99,7 +91,7 @@ fun ChatScreen(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要告诉小账的话")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要告诉小咩的话")
         }
         voiceLauncher.launch(intent)
     }
@@ -122,27 +114,13 @@ fun ChatScreen(
         if (itemCount > 0) listState.animateScrollToItem(itemCount - 1)
     }
 
-    LaunchedEffect(state.messages.size, state.isSending) {
-        val last = state.messages.lastOrNull { it.role == "assistant" }?.content
-        if (!state.isSending && last != null && state.autoSpeak && last != state.spokenAssistantContent) {
-            viewModel.markSpoken(last)
-            voiceHelper.speak(last)
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("小账助手") },
+                title = { Text("小咩助手") },
                 actions = {
-                    IconButton(onClick = { viewModel.toggleAutoSpeak() }) {
-                        Icon(
-                            if (state.autoSpeak) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                            contentDescription = "语音播报开关"
-                        )
-                    }
-                    IconButton(onClick = { showKbDialog = true }) {
-                        Icon(Icons.Filled.Folder, contentDescription = "知识库")
+                    IconButton(onClick = { viewModel.newConversation() }) {
+                        Icon(Icons.Filled.AddComment, contentDescription = "新对话")
                     }
                 }
             )
@@ -192,10 +170,6 @@ fun ChatScreen(
             )
         }
     }
-
-    if (showKbDialog) {
-        KbManagerDialog(onDismiss = { showKbDialog = false })
-    }
 }
 
 @Composable
@@ -230,10 +204,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
                     .background(Brush.linearGradient(listOf(WarmCoral, WarmPeach))),
                 contentAlignment = Alignment.Center
             ) {
-                Text("账", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                Text("咩", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
             }
             Spacer(Modifier.height(12.dp))
-            Text("我是你的专属智能体小账", style = MaterialTheme.typography.titleMedium)
+            Text("我是你的专属智能体小咩", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
                 "试试说：记一笔午饭30块、提醒我明天开会、本月花了多少",
@@ -307,7 +281,7 @@ private fun AssistantAvatar() {
             .background(Brush.linearGradient(listOf(WarmCoral, WarmPeach))),
         contentAlignment = Alignment.Center
     ) {
-        Text("账", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+        Text("咩", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -325,6 +299,7 @@ private fun InputBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
+            .imePadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         if (statusText.isNotBlank()) {
