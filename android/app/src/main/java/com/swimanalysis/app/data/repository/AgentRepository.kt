@@ -35,6 +35,8 @@ class AgentRepository @Inject constructor(
 
     suspend fun getMessages(id: String) = api.getMessages(id).items
 
+    suspend fun deleteConversation(id: String) = api.deleteConversation(id)
+
     suspend fun listSchedules() = api.listSchedules().items
 
     suspend fun createSchedule(title: String, content: String, remindAt: String, repeat: String) =

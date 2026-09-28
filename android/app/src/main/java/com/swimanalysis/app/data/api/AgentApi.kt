@@ -28,6 +28,9 @@ interface AgentApi {
     @GET("/api/agent/conversations/{id}/messages")
     suspend fun getMessages(@Path("id") id: String): MessageListResponse
 
+    @DELETE("/api/agent/conversations/{id}")
+    suspend fun deleteConversation(@Path("id") id: String): Map<String, String>
+
     @GET("/api/agent/schedules")
     suspend fun listSchedules(): ScheduleListResponse
 

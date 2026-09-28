@@ -2990,6 +2990,23 @@ async def agent_get_messages(conversation_id: str, user_id: str = Depends(get_cu
         db.close()
 
 
+@app.delete("/api/agent/conversations/{conversation_id}")
+async def agent_delete_conversation(conversation_id: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id, Conversation.user_id == user_id
+        ).first()
+        if not conv:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+        db.delete(conv)
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
 @app.get("/api/agent/schedules")
 async def agent_list_schedules(user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()

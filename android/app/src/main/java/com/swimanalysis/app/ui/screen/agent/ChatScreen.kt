@@ -9,6 +9,7 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,8 +33,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -65,6 +70,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
 
@@ -130,6 +136,9 @@ fun ChatScreen(
             TopAppBar(
                 title = { Text("小咩助手") },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleHistory(true) }) {
+                        Icon(Icons.Filled.History, contentDescription = "历史会话")
+                    }
                     IconButton(onClick = { viewModel.newConversation() }) {
                         Icon(Icons.Filled.AddComment, contentDescription = "新对话")
                     }
@@ -181,6 +190,15 @@ fun ChatScreen(
                 onStopStreaming = { viewModel.stopStreaming() }
             )
         }
+    }
+
+    if (state.showHistory) {
+        HistoryDialog(
+            conversations = state.conversations,
+            onSelect = viewModel::switchConversation,
+            onDelete = viewModel::deleteConversation,
+            onDismiss = { viewModel.toggleHistory(false) }
+        )
     }
 
     if (state.imageExtracting || state.extractedText.isNotBlank() || state.imageError != null) {
@@ -384,6 +402,88 @@ private fun InputBar(
                         .background(WarmCoral)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送", tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryDialog(
+    conversations: List<ConversationDto>,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text("历史会话", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
+                if (conversations.isEmpty()) {
+                    Text(
+                        "暂无历史会话",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height(360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(conversations, key = { it.id }) { conv ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelect(conv.id) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            conv.title.ifBlank { "新对话" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1
+                                        )
+                                        if (conv.updatedAt != null) {
+                                            Text(
+                                                conv.updatedAt,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { onDelete(conv.id) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Delete,
+                                            contentDescription = "删除会话",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("关闭") }
                 }
             }
         }

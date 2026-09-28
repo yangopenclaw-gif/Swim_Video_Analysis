@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui.screen.agent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.data.repository.AgentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -27,7 +28,9 @@ data class ChatUiState(
     val imageExtracting: Boolean = false,
     val extractedTitle: String = "",
     val extractedText: String = "",
-    val imageError: String? = null
+    val imageError: String? = null,
+    val conversations: List<ConversationDto> = emptyList(),
+    val showHistory: Boolean = false
 )
 
 @HiltViewModel
@@ -64,7 +67,61 @@ class ChatViewModel @Inject constructor(
     fun newConversation() {
         streamJob?.cancel()
         conversationId = null
-        _state.update { ChatUiState() }
+        _state.update {
+            it.copy(
+                messages = emptyList(),
+                isSending = false,
+                streamingText = "",
+                statusText = "",
+                error = null
+            )
+        }
+    }
+
+    fun toggleHistory(show: Boolean) {
+        if (show) loadConversations()
+        _state.update { it.copy(showHistory = show) }
+    }
+
+    fun loadConversations() {
+        viewModelScope.launch {
+            try {
+                val convs = repository.listConversations()
+                _state.update { it.copy(conversations = convs) }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun switchConversation(id: String) {
+        viewModelScope.launch {
+            try {
+                val msgs = repository.getMessages(id)
+                conversationId = id
+                _state.update {
+                    it.copy(
+                        messages = msgs.map { m -> ChatUiMessage(m.role, m.content) },
+                        streamingText = "", statusText = "", error = null,
+                        showHistory = false
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun deleteConversation(id: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteConversation(id)
+                if (conversationId == id) {
+                    conversationId = null
+                    _state.update { it.copy(messages = emptyList(), streamingText = "") }
+                }
+                loadConversations()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun send(text: String) {

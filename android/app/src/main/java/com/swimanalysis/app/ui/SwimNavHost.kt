@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.SmartToy
@@ -43,6 +44,7 @@ import com.swimanalysis.app.ui.screen.ledger.LedgerScreen
 import com.swimanalysis.app.ui.screen.ledger.StatsScreen
 import com.swimanalysis.app.ui.screen.agent.ChatScreen
 import com.swimanalysis.app.ui.screen.agent.NoteScreen
+import com.swimanalysis.app.ui.screen.agent.ScheduleScreen
 
 private data class BottomItem(
     val screen: Screen,
@@ -53,6 +55,7 @@ private data class BottomItem(
 private val bottomItems = listOf(
     BottomItem(Screen.Chat, Icons.Filled.SmartToy, "助手"),
     BottomItem(Screen.Notes, Icons.Filled.MenuBook, "记录本"),
+    BottomItem(Screen.Schedule, Icons.Filled.Notifications, "提醒"),
     BottomItem(Screen.Stats, Icons.Outlined.Analytics, "统计"),
     BottomItem(Screen.Ledger, Icons.Filled.ReceiptLong, "账单"),
     BottomItem(Screen.Profile, Icons.Filled.Person, "我的")
@@ -100,6 +103,7 @@ fun SwimNavHost() {
         ) {
             composable(Screen.Chat.route) { ChatScreen(navController) }
             composable(Screen.Notes.route) { NoteScreen() }
+            composable(Screen.Schedule.route) { ScheduleScreen() }
             composable(Screen.Ledger.route) { LedgerScreen(navController) }
             composable(Screen.Stats.route) { StatsScreen() }
             composable(Screen.AddEntry.route) { AddEntryScreen(navController) }
