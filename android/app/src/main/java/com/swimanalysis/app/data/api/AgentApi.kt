@@ -1,6 +1,7 @@
 package com.swimanalysis.app.data.api
 
 import com.swimanalysis.app.data.model.ConversationListResponse
+import com.swimanalysis.app.data.model.DocParseResponse
 import com.swimanalysis.app.data.model.DocumentListResponse
 import com.swimanalysis.app.data.model.ImageExtractResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
@@ -46,6 +47,10 @@ interface AgentApi {
     @Multipart
     @POST("/api/agent/kb/extract_image")
     suspend fun extractImage(@Part file: MultipartBody.Part): ImageExtractResponse
+
+    @Multipart
+    @POST("/api/agent/doc/parse")
+    suspend fun parseDocument(@Part file: MultipartBody.Part): DocParseResponse
 
     @GET("/api/agent/kb/documents")
     suspend fun listDocuments(): DocumentListResponse

@@ -2811,6 +2811,31 @@ def build_agent_tools(user_id: str) -> dict:
         finally:
             db.close()
 
+    async def pdf_generate(args):
+        title = (args.get("title") or "文档").strip() or "文档"
+        content = args.get("content") or ""
+        if not content.strip():
+            return {"error": "PDF 内容不能为空"}
+        from . import doc_parser
+        try:
+            pdf_bytes = doc_parser.text_to_pdf(content)
+        except Exception as e:
+            logger.error(f"PDF 生成失败: {e}")
+            return {"error": f"PDF 生成失败: {str(e)}"}
+        gen_dir = os.path.join(DATA_DIR, "generated")
+        os.makedirs(gen_dir, exist_ok=True)
+        safe_title = "".join(c if c.isalnum() or c in "._-" else "_" for c in title)[:40]
+        filename = f"{safe_title}_{uuid.uuid4().hex[:8]}.pdf"
+        path = os.path.join(gen_dir, filename)
+        with open(path, "wb") as f:
+            f.write(pdf_bytes)
+        return {
+            "status": "ok",
+            "message": f"已生成 PDF：{title}",
+            "filename": filename,
+            "url": f"/api/agent/generated/{filename}",
+        }
+
     return {
         "ledger_add": Tool(
             "ledger_add", "新增一条记账记录",
@@ -2893,6 +2918,14 @@ def build_agent_tools(user_id: str) -> dict:
             "note_list", "查看记录本中的记录列表",
             {"type": "object", "properties": {}},
             note_list
+        ),
+        "pdf_generate": Tool(
+            "pdf_generate", "根据标题和文字内容生成一份中文 PDF 文档，返回下载链接",
+            {"type": "object", "properties": {
+                "title": {"type": "string", "description": "文档标题"},
+                "content": {"type": "string", "description": "要写入 PDF 的正文内容，支持多行"},
+            }, "required": ["content"]},
+            pdf_generate
         ),
     }
 
@@ -3051,6 +3084,31 @@ async def agent_delete_schedule(schedule_id: str, user_id: str = Depends(get_cur
         return {"status": "ok"}
     finally:
         db.close()
+
+
+@app.post("/api/agent/doc/parse")
+async def agent_doc_parse(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+    try:
+        from . import doc_parser
+        text = doc_parser.parse_document(content, file.filename or "")
+    except Exception as e:
+        logger.error(f"文档解析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文档解析失败: {str(e)}")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="未能从文档中提取到文字内容")
+    return {"status": "ok", "text": text, "filename": file.filename or ""}
+
+
+@app.get("/api/agent/generated/{filename}")
+async def agent_generated_download(filename: str, user_id: str = Depends(get_current_user_id)):
+    gen_dir = os.path.join(DATA_DIR, "generated")
+    path = os.path.join(gen_dir, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
 @app.post("/api/agent/kb/extract_image")

@@ -112,3 +112,9 @@ data class ImageExtractResponse(
     val status: String = "",
     val text: String = ""
 )
+@Serializable
+data class DocParseResponse(
+    val status: String = "",
+    val text: String = "",
+    val filename: String = ""
+)

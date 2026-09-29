@@ -29,6 +29,10 @@ data class ChatUiState(
     val extractedTitle: String = "",
     val extractedText: String = "",
     val imageError: String? = null,
+    val docParsing: Boolean = false,
+    val docFilename: String = "",
+    val docText: String = "",
+    val docError: String? = null,
     val conversations: List<ConversationDto> = emptyList(),
     val showHistory: Boolean = false
 )
@@ -44,6 +48,7 @@ class ChatViewModel @Inject constructor(
     private var conversationId: String? = null
     private var streamJob: Job? = null
     private var imageJob: Job? = null
+    private var docJob: Job? = null
 
     init {
         loadLatestConversation()
@@ -222,5 +227,44 @@ class ChatViewModel @Inject constructor(
         _state.update {
             it.copy(imageExtracting = false, extractedTitle = "", extractedText = "", imageError = null)
         }
+    }
+
+    fun parseDocument(uri: Uri) {
+        if (_state.value.docParsing) return
+        _state.update { it.copy(docParsing = true, docError = null) }
+        docJob = viewModelScope.launch {
+            try {
+                val result = repository.parseDocument(uri)
+                _state.update {
+                    it.copy(docParsing = false, docFilename = result.filename, docText = result.text)
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(docParsing = false, docError = e.message) }
+            }
+        }
+    }
+
+    fun setDocText(text: String) = _state.update { it.copy(docText = text) }
+
+    fun saveDocToKb() {
+        val content = _state.value.docText.trim()
+        if (content.isEmpty()) {
+            _state.update { it.copy(docError = "解析内容为空") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val title = _state.value.docFilename.ifBlank { "文档" }
+                repository.uploadDocument(title, content)
+                _state.update { it.copy(docFilename = "", docText = "", docError = null) }
+            } catch (e: Exception) {
+                _state.update { it.copy(docError = e.message) }
+            }
+        }
+    }
+
+    fun dismissDocResult() {
+        docJob?.cancel()
+        _state.update { it.copy(docParsing = false, docFilename = "", docText = "", docError = null) }
     }
 }

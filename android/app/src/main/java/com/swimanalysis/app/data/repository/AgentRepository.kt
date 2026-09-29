@@ -2,10 +2,12 @@ package com.swimanalysis.app.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.data.api.AgentApi
 import com.swimanalysis.app.data.model.AgentChatRequest
 import com.swimanalysis.app.data.model.ChatEvent
+import com.swimanalysis.app.data.model.DocParseResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
@@ -66,6 +68,39 @@ class AgentRepository @Inject constructor(
             "file", "image.$ext", bytes.toRequestBody(mime.toMediaType())
         )
         api.extractImage(part).text
+    }
+
+    suspend fun parseDocument(uri: Uri): DocParseResponse = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        val name = queryDisplayName(uri) ?: fallbackName(mime)
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IllegalStateException("无法读取文件")
+        val part = MultipartBody.Part.createFormData(
+            "file", name, bytes.toRequestBody(mime.toMediaType())
+        )
+        api.parseDocument(part)
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        var name: String? = null
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) name = cursor.getString(idx)
+            }
+        }
+        return name
+    }
+
+    private fun fallbackName(mime: String): String {
+        val ext = when {
+            mime.contains("pdf") -> "pdf"
+            mime.contains("word") || mime.contains("document") -> "docx"
+            mime.contains("sheet") || mime.contains("excel") -> "xlsx"
+            else -> "txt"
+        }
+        return "document.$ext"
     }
 
     suspend fun listNotes() = api.listNotes().items
