@@ -514,6 +514,15 @@ private fun HistoryDialog(
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(18.dp)
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("关闭") }
                 }
             }
         }
@@ -584,15 +593,7 @@ private fun DocParseDialog(
         }
     }
 }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("关闭") }
-                }
-            }
-        }
-    }
-}
+
 
 @Composable
 private fun ImageExtractDialog(
