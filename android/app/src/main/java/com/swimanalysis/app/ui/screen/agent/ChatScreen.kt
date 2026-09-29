@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -289,11 +290,13 @@ private fun MessageBubble(msg: ChatUiMessage) {
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Text(
-                msg.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
-            )
+            SelectionContainer {
+                Text(
+                    msg.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
     }
 }
@@ -310,7 +313,9 @@ private fun StreamingBubble(text: String) {
                 .background(Brush.horizontalGradient(listOf(Color.White, Color(0xFFFFF3EA))))
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Text(text, style = MaterialTheme.typography.bodyMedium)
+            SelectionContainer {
+                Text(text, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }

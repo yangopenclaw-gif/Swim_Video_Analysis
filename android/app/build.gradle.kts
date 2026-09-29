@@ -14,8 +14,8 @@ android {
         applicationId = "com.swimanalysis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 35
-        versionName = "2.3.6"
+        versionCode = 36
+        versionName = "2.3.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
