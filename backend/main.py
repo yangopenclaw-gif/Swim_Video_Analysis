@@ -38,9 +38,11 @@ CHUNKS_DIR = os.path.join(UPLOAD_DIR, ".chunks")
 AVATAR_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "avatars")
 if os.environ.get('STAGING_MODE'):
     AVATAR_DIR = os.path.join(os.environ['STAGING_DIR'], "avatars")
+AGENT_FILES_DIR = os.path.join(DATA_DIR, "agent_files")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CHUNKS_DIR, exist_ok=True)
+os.makedirs(AGENT_FILES_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, "swim_analysis.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
@@ -2600,6 +2602,45 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
         logger.warning("记忆提取失败: %s", e)
 
 
+def _find_agent_file(file_id: str) -> Optional[str]:
+    """根据 file_id 在暂存目录中查找文件路径（保留原始扩展名）。"""
+    if not file_id or os.path.sep in file_id or ".." in file_id:
+        return None
+    prefix = file_id + "."
+    for name in os.listdir(AGENT_FILES_DIR):
+        if name.startswith(prefix):
+            return os.path.join(AGENT_FILES_DIR, name)
+    return None
+
+
+async def _extract_image_text(content: bytes, filename: str) -> str:
+    """调用视觉模型识别图片文字，返回整理后的文本。"""
+    import base64
+    import httpx
+    b64 = base64.b64encode(content).decode()
+    ext = os.path.splitext(filename or ".jpg")[1].lower()
+    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".webp": "image/webp", ".bmp": "image/bmp"}
+    mime = mime_map.get(ext, "image/jpeg")
+    prompt = """请仔细查看这张图片，提炼其中的关键信息，用简体中文、结构化要点形式整理输出。
+若是票据/文档/截图，请尽量完整还原其中的重要文字信息并归类整理；若是照片，请概括主要内容。
+直接输出整理后的文本内容，不要加任何解释性前缀或后缀。"""
+    async with httpx.AsyncClient(timeout=60) as client:
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+        ]}]
+        resp = await client.post(
+            f"{LLM_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json={"model": LLM_MODEL, "messages": messages, "temperature": 0.2}
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"视觉模型调用失败: {resp.status_code}")
+        data = resp.json()
+        return (data["choices"][0]["message"]["content"] or "").strip()
+
+
 def build_agent_tools(user_id: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -2836,6 +2877,43 @@ def build_agent_tools(user_id: str) -> dict:
             "url": f"/api/agent/generated/{filename}",
         }
 
+    async def doc_parse(args):
+        file_id = (args.get("file_id") or "").strip()
+        if not file_id:
+            return {"error": "缺少 file_id，请先让用户上传文件"}
+        path = _find_agent_file(file_id)
+        if not path:
+            return {"error": "文件不存在或已过期，请重新上传"}
+        try:
+            from . import doc_parser
+            with open(path, "rb") as f:
+                content = f.read()
+            text = doc_parser.parse_document(content, os.path.basename(path))
+        except Exception as e:
+            logger.error(f"文档解析失败: {e}")
+            return {"error": f"文档解析失败: {str(e)}"}
+        if not text.strip():
+            return {"error": "未能从文档中提取到文字内容"}
+        return {"status": "ok", "filename": os.path.basename(path), "text": text}
+
+    async def image_extract(args):
+        file_id = (args.get("file_id") or "").strip()
+        if not file_id:
+            return {"error": "缺少 file_id，请先让用户上传图片"}
+        if not LLM_API_KEY:
+            return {"error": "未配置视觉模型 API 密钥"}
+        path = _find_agent_file(file_id)
+        if not path:
+            return {"error": "图片不存在或已过期，请重新上传"}
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+            text = await _extract_image_text(content, os.path.basename(path))
+        except Exception as e:
+            logger.error(f"图片识别失败: {e}")
+            return {"error": f"图片识别失败: {str(e)}"}
+        return {"status": "ok", "text": text}
+
     return {
         "ledger_add": Tool(
             "ledger_add", "新增一条记账记录",
@@ -2926,6 +3004,20 @@ def build_agent_tools(user_id: str) -> dict:
                 "content": {"type": "string", "description": "要写入 PDF 的正文内容，支持多行"},
             }, "required": ["content"]},
             pdf_generate
+        ),
+        "doc_parse": Tool(
+            "doc_parse", "解析用户上传的文档（PDF/Word/Excel/文本）为纯文本。用户需先上传文件并拿到 file_id，再把 file_id 传入。",
+            {"type": "object", "properties": {
+                "file_id": {"type": "string", "description": "用户上传文件后返回的文件ID"},
+            }, "required": ["file_id"]},
+            doc_parse
+        ),
+        "image_extract": Tool(
+            "image_extract", "识别用户上传的图片中的文字/内容，整理为结构化文本。用户需先上传图片并拿到 file_id，再把 file_id 传入。",
+            {"type": "object", "properties": {
+                "file_id": {"type": "string", "description": "用户上传图片后返回的文件ID"},
+            }, "required": ["file_id"]},
+            image_extract
         ),
     }
 
@@ -3084,6 +3176,19 @@ async def agent_delete_schedule(schedule_id: str, user_id: str = Depends(get_cur
         return {"status": "ok"}
     finally:
         db.close()
+
+
+@app.post("/api/agent/upload_file")
+async def agent_upload_file(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+    fid = str(uuid.uuid4())
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    path = os.path.join(AGENT_FILES_DIR, f"{fid}{ext}")
+    with open(path, "wb") as f:
+        f.write(content)
+    return {"status": "ok", "file_id": fid, "filename": file.filename or ""}
 
 
 @app.post("/api/agent/doc/parse")

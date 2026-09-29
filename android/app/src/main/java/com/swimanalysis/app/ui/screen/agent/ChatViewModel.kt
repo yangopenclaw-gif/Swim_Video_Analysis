@@ -267,4 +267,26 @@ class ChatViewModel @Inject constructor(
         docJob?.cancel()
         _state.update { it.copy(docParsing = false, docFilename = "", docText = "", docError = null) }
     }
+
+    fun uploadImageAndAsk(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val resp = repository.uploadFile(uri)
+                send("我上传了一张图片，请帮我识别其中的内容并提炼要点（文件ID：${resp.fileId}）")
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    fun uploadDocAndAsk(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val resp = repository.uploadFile(uri)
+                send("我上传了一个文档，请帮我解析并总结要点（文件ID：${resp.fileId}）")
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
 }

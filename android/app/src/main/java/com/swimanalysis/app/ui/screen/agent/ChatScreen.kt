@@ -34,6 +34,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -99,17 +101,36 @@ fun ChatScreen(
         }
     }
 
+    var imageAsk by remember { mutableStateOf(false) }
+    var docAsk by remember { mutableStateOf(false) }
+    var showAttachMenu by remember { mutableStateOf(false) }
+
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null) viewModel.extractImage(uri)
+        if (uri != null) {
+            if (imageAsk) viewModel.uploadImageAndAsk(uri) else viewModel.extractImage(uri)
+            imageAsk = false
+        }
     }
 
     val docLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        if (uri != null) viewModel.parseDocument(uri)
+        if (uri != null) {
+            if (docAsk) viewModel.uploadDocAndAsk(uri) else viewModel.parseDocument(uri)
+            docAsk = false
+        }
     }
+
+    val docMimeTypes = arrayOf(
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/plain"
+    )
 
     fun launchVoice() {
         if (state.isSending) return
@@ -194,15 +215,7 @@ fun ChatScreen(
                     inputText = ""
                 },
                 onMic = { launchVoice() },
-                onImage = { imageLauncher.launch("image/*") },
-                onDoc = { docLauncher.launch(arrayOf(
-                    "application/pdf",
-                    "application/msword",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/vnd.ms-excel",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "text/plain"
-                )) },
+                onAttach = { showAttachMenu = true },
                 onStopStreaming = { viewModel.stopStreaming() }
             )
         }
@@ -239,6 +252,32 @@ fun ChatScreen(
             onTextChange = viewModel::setDocText,
             onSave = viewModel::saveDocToKb,
             onDismiss = viewModel::dismissDocResult
+        )
+    }
+
+    if (showAttachMenu) {
+        AttachMenuDialog(
+            onImageKb = {
+                showAttachMenu = false
+                imageAsk = false
+                imageLauncher.launch("image/*")
+            },
+            onImageAsk = {
+                showAttachMenu = false
+                imageAsk = true
+                imageLauncher.launch("image/*")
+            },
+            onDocKb = {
+                showAttachMenu = false
+                docAsk = false
+                docLauncher.launch(docMimeTypes)
+            },
+            onDocAsk = {
+                showAttachMenu = false
+                docAsk = true
+                docLauncher.launch(docMimeTypes)
+            },
+            onDismiss = { showAttachMenu = false }
         )
     }
 }
@@ -368,8 +407,7 @@ private fun InputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMic: () -> Unit,
-    onImage: () -> Unit,
-    onDoc: () -> Unit,
+    onAttach: () -> Unit,
     onStopStreaming: () -> Unit
 ) {
     Column(
@@ -400,16 +438,10 @@ private fun InputBar(
             )
             Spacer(Modifier.width(8.dp))
             IconButton(
-                onClick = onImage,
+                onClick = onAttach,
                 modifier = Modifier.size(44.dp)
             ) {
-                Icon(Icons.Filled.AddPhotoAlternate, contentDescription = "上传图片识别入库", tint = WarmCoral)
-            }
-            IconButton(
-                onClick = onDoc,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Icon(Icons.Filled.Description, contentDescription = "上传文档解析", tint = WarmCoral)
+                Icon(Icons.Filled.AttachFile, contentDescription = "上传文件", tint = WarmCoral)
             }
             Spacer(Modifier.width(4.dp))
             if (isSending) {
@@ -664,6 +696,92 @@ private fun ImageExtractDialog(
                     }
                 }
             }
+        }
+    }
+}
+@Composable
+private fun AttachMenuDialog(
+    onImageKb: () -> Unit,
+    onImageAsk: () -> Unit,
+    onDocKb: () -> Unit,
+    onDocAsk: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text("上传文件", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "选择要上传的内容及处理方式。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                AttachMenuItem(
+                    icon = Icons.Filled.AddPhotoAlternate,
+                    title = "图片转知识",
+                    subtitle = "识别图片并存入知识库",
+                    onClick = onImageKb
+                )
+                AttachMenuItem(
+                    icon = Icons.Filled.Description,
+                    title = "文档解析",
+                    subtitle = "解析文档文字并存入知识库",
+                    onClick = onDocKb
+                )
+                AttachMenuItem(
+                    icon = Icons.Filled.AutoAwesome,
+                    title = "让 LLM 识别图片",
+                    subtitle = "小咩自动识别并总结图片内容",
+                    onClick = onImageAsk
+                )
+                AttachMenuItem(
+                    icon = Icons.Filled.AutoAwesome,
+                    title = "让 LLM 解析文档",
+                    subtitle = "小咩自动解析并总结文档要点",
+                    onClick = onDocAsk
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = WarmCoral,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

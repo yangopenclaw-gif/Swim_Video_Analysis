@@ -11,6 +11,7 @@ import com.swimanalysis.app.data.model.DocParseResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
+import com.swimanalysis.app.data.model.UploadFileResponse
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -80,6 +81,18 @@ class AgentRepository @Inject constructor(
             "file", name, bytes.toRequestBody(mime.toMediaType())
         )
         api.parseDocument(part)
+    }
+
+    suspend fun uploadFile(uri: Uri): UploadFileResponse = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        val name = queryDisplayName(uri) ?: fallbackName(mime)
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IllegalStateException("无法读取文件")
+        val part = MultipartBody.Part.createFormData(
+            "file", name, bytes.toRequestBody(mime.toMediaType())
+        )
+        api.uploadFile(part)
     }
 
     private fun queryDisplayName(uri: Uri): String? {

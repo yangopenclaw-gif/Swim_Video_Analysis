@@ -118,3 +118,9 @@ data class DocParseResponse(
     val text: String = "",
     val filename: String = ""
 )
+@Serializable
+data class UploadFileResponse(
+    val status: String = "",
+    @SerialName("file_id") val fileId: String = "",
+    val filename: String = ""
+)

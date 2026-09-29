@@ -11,6 +11,7 @@ import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.NoteListResponse
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import com.swimanalysis.app.data.model.ScheduleListResponse
+import com.swimanalysis.app.data.model.UploadFileResponse
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -51,6 +52,10 @@ interface AgentApi {
     @Multipart
     @POST("/api/agent/doc/parse")
     suspend fun parseDocument(@Part file: MultipartBody.Part): DocParseResponse
+
+    @Multipart
+    @POST("/api/agent/upload_file")
+    suspend fun uploadFile(@Part file: MultipartBody.Part): UploadFileResponse
 
     @GET("/api/agent/kb/documents")
     suspend fun listDocuments(): DocumentListResponse
