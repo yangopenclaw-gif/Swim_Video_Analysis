@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui.screen
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.swimanalysis.app.AppLockGuard
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -149,6 +150,7 @@ fun RecordsScreen(navController: NavController, viewModel: RecordsViewModel = hi
                             onClick = { navController.navigate(Screen.SwimmerRecords.withArgs(name)) },
                             onEditAvatar = {
                                 pendingAvatarName = name
+                                AppLockGuard.awaitingExternalActivity = true
                                 galleryLauncher.launch("image/*")
                             }
                         )

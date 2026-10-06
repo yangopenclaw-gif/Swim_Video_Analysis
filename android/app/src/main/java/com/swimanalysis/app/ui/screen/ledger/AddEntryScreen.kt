@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.swimanalysis.app.AppLockGuard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -75,6 +76,7 @@ fun AddEntryScreen(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
             putExtra(RecognizerIntent.EXTRA_PROMPT, "说出记账内容，例如：今天午饭花了30块")
         }
+        AppLockGuard.awaitingExternalActivity = true
         voiceLauncher.launch(intent)
     }
 

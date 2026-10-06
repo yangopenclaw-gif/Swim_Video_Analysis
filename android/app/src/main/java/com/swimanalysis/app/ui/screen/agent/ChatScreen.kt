@@ -74,6 +74,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.swimanalysis.app.AppLockGuard
 import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
@@ -139,6 +140,7 @@ fun ChatScreen(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
             putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要告诉小咩的话")
         }
+        AppLockGuard.awaitingExternalActivity = true
         voiceLauncher.launch(intent)
     }
 
@@ -260,21 +262,25 @@ fun ChatScreen(
             onImageKb = {
                 showAttachMenu = false
                 imageAsk = false
+                AppLockGuard.awaitingExternalActivity = true
                 imageLauncher.launch("image/*")
             },
             onImageAsk = {
                 showAttachMenu = false
                 imageAsk = true
+                AppLockGuard.awaitingExternalActivity = true
                 imageLauncher.launch("image/*")
             },
             onDocKb = {
                 showAttachMenu = false
                 docAsk = false
+                AppLockGuard.awaitingExternalActivity = true
                 docLauncher.launch(docMimeTypes)
             },
             onDocAsk = {
                 showAttachMenu = false
                 docAsk = true
+                AppLockGuard.awaitingExternalActivity = true
                 docLauncher.launch(docMimeTypes)
             },
             onDismiss = { showAttachMenu = false }

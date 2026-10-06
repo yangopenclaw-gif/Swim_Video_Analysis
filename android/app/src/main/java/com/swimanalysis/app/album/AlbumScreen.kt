@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.swimanalysis.app.AppLockGuard
 import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,7 +133,10 @@ fun AlbumScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
-                            onClick = { galleryLauncher.launch("image/*") },
+                            onClick = {
+                                AppLockGuard.awaitingExternalActivity = true
+                                galleryLauncher.launch("image/*")
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null)

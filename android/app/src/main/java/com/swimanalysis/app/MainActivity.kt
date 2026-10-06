@@ -31,8 +31,14 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                AppLockGuard.awaitingExternalActivity = false
+            }
+
             override fun onStop(owner: LifecycleOwner) {
-                authStore.lock()
+                if (!AppLockGuard.awaitingExternalActivity) {
+                    authStore.lock()
+                }
             }
         })
         setContent {

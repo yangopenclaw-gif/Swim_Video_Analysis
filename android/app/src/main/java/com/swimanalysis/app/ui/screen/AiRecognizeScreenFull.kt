@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui.screen
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.swimanalysis.app.AppLockGuard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -140,7 +141,10 @@ fun AiRecognizeScreenFull(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { galleryLauncher.launch("image/*") },
+                    onClick = {
+                        AppLockGuard.awaitingExternalActivity = true
+                        galleryLauncher.launch("image/*")
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Filled.PhotoLibrary, contentDescription = null)
