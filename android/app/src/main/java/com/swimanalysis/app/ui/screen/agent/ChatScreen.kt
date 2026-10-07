@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
@@ -75,6 +76,7 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.swimanalysis.app.AppLockGuard
+import com.swimanalysis.app.data.model.ChatAttachment
 import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
@@ -199,7 +201,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(state.messages) { msg ->
-                        MessageBubble(msg)
+                        MessageBubble(msg, viewModel::downloadAttachment)
                     }
                     if (state.streamingText.isNotBlank()) {
                         item { StreamingBubble(state.streamingText) }
@@ -335,7 +337,7 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MessageBubble(msg: ChatUiMessage) {
+private fun MessageBubble(msg: ChatUiMessage, onDownload: (ChatAttachment) -> Unit) {
     val isUser = msg.role == "user"
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -362,14 +364,32 @@ private fun MessageBubble(msg: ChatUiMessage) {
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            SelectionContainer {
-                Text(
-                    msg.content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SelectionContainer {
+                    Text(
+                        msg.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                msg.attachments.forEach { att ->
+                    AttachmentChip(att, onDownload)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun AttachmentChip(att: ChatAttachment, onDownload: (ChatAttachment) -> Unit) {
+    TextButton(onClick = { onDownload(att) }) {
+        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(6.dp))
+        Text(
+            att.filename.ifBlank { "下载文件" },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 

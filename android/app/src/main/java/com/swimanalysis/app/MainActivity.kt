@@ -3,6 +3,7 @@ package com.swimanalysis.app
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -49,11 +50,14 @@ class MainActivity : FragmentActivity() {
                 ) {
                     val isLoggedIn by authStore.isLoggedIn.collectAsState()
                     val locked by authStore.locked.collectAsState()
-                    when {
-                        isLoggedIn == false -> LoginScreen()
-                        isLoggedIn == true && locked -> LockScreen()
-                        isLoggedIn == true -> SwimNavHost()
-                        else -> {}
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when {
+                            isLoggedIn == false -> LoginScreen()
+                            isLoggedIn == true -> SwimNavHost()
+                        }
+                        if (isLoggedIn == true && locked) {
+                            LockScreen()
+                        }
                     }
                 }
             }

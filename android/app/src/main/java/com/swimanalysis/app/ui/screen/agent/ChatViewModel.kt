@@ -3,6 +3,7 @@ package com.swimanalysis.app.ui.screen.agent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swimanalysis.app.data.model.ChatAttachment
 import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.data.repository.AgentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,7 +17,8 @@ import javax.inject.Inject
 
 data class ChatUiMessage(
     val role: String,
-    val content: String
+    val content: String,
+    val attachments: List<ChatAttachment> = emptyList()
 )
 
 data class ChatUiState(
@@ -141,6 +143,7 @@ class ChatViewModel @Inject constructor(
         streamJob = viewModelScope.launch {
             val assistant = StringBuilder()
             try {
+                val attachments = mutableListOf<ChatAttachment>()
                 repository.streamChat(trimmed, conversationId).collect { event ->
                     when (event.type) {
                         "meta" -> event.conversationId?.let { conversationId = it }
@@ -149,6 +152,9 @@ class ChatViewModel @Inject constructor(
                             assistant.append(event.text)
                             _state.update { it.copy(streamingText = assistant.toString()) }
                         }
+                        "attachment" -> attachments.add(
+                            ChatAttachment(event.kind, event.filename, event.title, event.url)
+                        )
                         "error" -> _state.update { it.copy(error = event.text) }
                     }
                 }
@@ -156,7 +162,7 @@ class ChatViewModel @Inject constructor(
                 _state.update {
                     if (final.isNotBlank()) {
                         it.copy(
-                            messages = it.messages + ChatUiMessage("assistant", final),
+                            messages = it.messages + ChatUiMessage("assistant", final, attachments.toList()),
                             isSending = false, streamingText = "", statusText = ""
                         )
                     } else {
@@ -288,5 +294,9 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(error = e.message) }
             }
         }
+    }
+
+    fun downloadAttachment(att: ChatAttachment) {
+        repository.downloadAttachment(att.url, att.filename)
     }
 }

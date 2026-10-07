@@ -1,10 +1,12 @@
 package com.swimanalysis.app.data.repository
 
+import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.swimanalysis.app.BuildConfig
 import com.swimanalysis.app.data.api.AgentApi
+import com.swimanalysis.app.data.local.AuthStore
 import com.swimanalysis.app.data.model.AgentChatRequest
 import com.swimanalysis.app.data.model.ChatEvent
 import com.swimanalysis.app.data.model.DocParseResponse
@@ -32,6 +34,7 @@ class AgentRepository @Inject constructor(
     private val api: AgentApi,
     private val client: OkHttpClient,
     private val json: Json,
+    private val authStore: AuthStore,
     @ApplicationContext private val context: Context
 ) {
     suspend fun listConversations() = api.listConversations().items
@@ -156,5 +159,21 @@ class AgentRepository @Inject constructor(
             }
         }
         response.close()
+    }
+
+    fun downloadAttachment(url: String, filename: String) {
+        val fullUrl = if (url.startsWith("http")) url else BuildConfig.SERVER_BASE_URL + url
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val request = DownloadManager.Request(Uri.parse(fullUrl))
+            .setTitle(filename)
+            .setDescription("下载 $filename")
+            .setMimeType("application/pdf")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        authStore.currentToken()?.let { token ->
+            if (token.isNotBlank()) {
+                request.addRequestHeader("Authorization", "Bearer $token")
+            }
+        }
+        dm.enqueue(request)
     }
 }

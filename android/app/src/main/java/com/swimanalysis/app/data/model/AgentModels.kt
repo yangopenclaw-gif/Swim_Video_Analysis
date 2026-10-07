@@ -14,7 +14,19 @@ data class ChatEvent(
     val type: String = "",
     val text: String = "",
     val name: String = "",
-    @SerialName("conversation_id") val conversationId: String? = null
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val kind: String = "",
+    val filename: String = "",
+    val title: String = "",
+    val url: String = ""
+)
+
+@Serializable
+data class ChatAttachment(
+    val kind: String = "",
+    val filename: String = "",
+    val title: String = "",
+    val url: String = ""
 )
 
 @Serializable

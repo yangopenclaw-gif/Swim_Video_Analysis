@@ -101,6 +101,19 @@ async def run_agent(
                     else:
                         yield {"type": "tool", "name": name, "args": args}
                         result = await _call_handler(tool.handler, args)
+                        try:
+                            data = json.loads(result) if isinstance(result, str) else result
+                            if isinstance(data, dict) and isinstance(data.get("attachment"), dict):
+                                att = data["attachment"]
+                                yield {
+                                    "type": "attachment",
+                                    "kind": att.get("kind", "file"),
+                                    "filename": att.get("filename", ""),
+                                    "title": att.get("title", ""),
+                                    "url": att.get("url", ""),
+                                }
+                        except Exception:
+                            pass
 
                     messages.append({
                         "role": "tool",

@@ -2509,7 +2509,9 @@ def build_system_prompt(memories: List[str], today_date: str) -> str:
         f"工具：记账 ledger_add/ledger_query/ledger_summary；"
         f"提醒 schedule_add/schedule_list/schedule_delete；"
         f"知识 kb_add/kb_search；记录本 note_add/note_list。\n"
-        f"规则：金额默认 CNY，未说日期用今天；用简体中文简洁回复；涉及金额时间务必准确。"
+        f"规则：金额默认 CNY，未说日期用今天；用简体中文简洁回复；涉及金额时间务必准确。\n"
+        f"重要：当用户告诉你关于他/她自己的信息（偏好、习惯、目标、重要事实、约定等）时，"
+        f"务必调用 kb_add 将其保存到知识库，不要只在对话中回应就丢掉。"
         f"{mem_text}"
     )
 
@@ -2531,6 +2533,15 @@ def _is_duplicate(text: str, existing: List[str]) -> bool:
 
 
 def recall_memories(user_id: str, query: str, top_k: int = 5) -> List[str]:
+    try:
+        from . import kb
+        results = kb.search(user_id, DATA_DIR, query, top_k=top_k)
+        contents = [r.get("content", "").strip() for r in results if (r.get("content") or "").strip()]
+        if contents:
+            return contents[:top_k]
+    except Exception as e:
+        logger.warning("向量记忆召回失败，回退字符匹配: %s", e)
+
     db = SessionLocal()
     try:
         memories = db.query(Memory).filter(Memory.user_id == user_id).all()
@@ -2573,6 +2584,7 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
         if not isinstance(items, list):
             return
         db = SessionLocal()
+        new_memories: List[str] = []
         try:
             existing = [m.content for m in db.query(Memory).filter(Memory.user_id == user_id).all()]
             for it in items:
@@ -2585,7 +2597,7 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
                     imp = float(it.get("importance") or 0.5)
                 except (TypeError, ValueError):
                     imp = 0.5
-                if imp < 0.5:
+                if imp < 0.3:
                     continue
                 if _is_duplicate(content, existing):
                     continue
@@ -2595,9 +2607,16 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
                     content=content, importance=imp
                 ))
                 existing.append(content)
+                new_memories.append(content)
             db.commit()
         finally:
             db.close()
+        if new_memories:
+            try:
+                from . import kb
+                kb.add_chunks(user_id, DATA_DIR, f"mem_{uuid.uuid4()}", "记忆", new_memories)
+            except Exception as e:
+                logger.warning("记忆向量化失败: %s", e)
     except Exception as e:
         logger.warning("记忆提取失败: %s", e)
 
@@ -2875,6 +2894,12 @@ def build_agent_tools(user_id: str) -> dict:
             "message": f"已生成 PDF：{title}",
             "filename": filename,
             "url": f"/api/agent/generated/{filename}",
+            "attachment": {
+                "kind": "pdf",
+                "filename": filename,
+                "title": title,
+                "url": f"/api/agent/generated/{filename}",
+            },
         }
 
     async def doc_parse(args):
