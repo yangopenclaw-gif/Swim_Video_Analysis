@@ -278,6 +278,17 @@ def get_current_user_id(request: Request) -> str:
 Base.metadata.create_all(bind=engine)
 
 
+def _normalize_date(date_str: str) -> str:
+    """把 YYYY-M-D / YYYY-MM-DD 等统一规范化为 YYYY-MM-DD（补零），无法解析则原样返回"""
+    s = (date_str or "").strip()
+    if not s:
+        return s
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return s
+
+
 def _migrate_ledger_columns():
     import sqlite3
     conn = engine.raw_connection()
@@ -298,6 +309,24 @@ def _migrate_ledger_columns():
 
 
 _migrate_ledger_columns()
+
+
+def _migrate_normalize_dates():
+    dbs = SessionLocal()
+    try:
+        changed = 0
+        for e in dbs.query(LedgerEntry).all():
+            norm = _normalize_date(e.entry_date)
+            if norm != e.entry_date:
+                e.entry_date = norm
+                changed += 1
+        if changed:
+            dbs.commit()
+    finally:
+        dbs.close()
+
+
+_migrate_normalize_dates()
 
 
 def _fix_created_at_timezone():
@@ -2103,7 +2132,7 @@ async def create_ledger_entry(request: Request, user_id: str = Depends(get_curre
     items, currency, amount, amount_cny, amounts_json = parsed
     category = body.get("category", "其他")
     note = body.get("note", "")
-    entry_date = body.get("entry_date", datetime.now().strftime("%Y-%m-%d"))
+    entry_date = _normalize_date(body.get("entry_date", datetime.now().strftime("%Y-%m-%d")))
     entry_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
@@ -2163,7 +2192,7 @@ async def update_ledger_entry(entry_id: str, request: Request, user_id: str = De
         if "note" in body:
             entry.note = body["note"]
         if "entry_date" in body:
-            entry.entry_date = body["entry_date"]
+            entry.entry_date = _normalize_date(body["entry_date"])
         if "amounts" in body:
             parsed = _parse_entry_amounts(body)
             if parsed:
@@ -2259,18 +2288,33 @@ async def ledger_calendar(year: Optional[str] = None, month: Optional[str] = Non
         entries = q.all()
         daily = {}
         for e in entries:
-            amt = e.amount_cny if e.amount_cny else e.amount
+            amt_cny = e.amount_cny if e.amount_cny else e.amount
             day = e.entry_date
             if day not in daily:
-                daily[day] = {"date": day, "expense": 0.0, "income": 0.0}
-            if e.entry_type == "expense":
-                daily[day]["expense"] += amt
-            else:
-                daily[day]["income"] += amt
+                daily[day] = {
+                    "date": day, "expense": 0.0, "income": 0.0,
+                    "expense_items": {}, "income_items": {},
+                }
+            key = "expense" if e.entry_type == "expense" else "income"
+            daily[day][key] += amt_cny
+            cur = e.currency or "CNY"
+            amt_orig = e.amount if e.amount else 0.0
+            daily[day][key + "_items"][cur] = daily[day][key + "_items"].get(cur, 0.0) + amt_orig
+
+        def to_items(m):
+            ordered = sorted(m.keys(), key=lambda c: (c != "CNY", c))
+            return [{"currency": c, "amount": round(m[c], 2)} for c in ordered]
+
         items = []
         for d in sorted(daily.keys()):
             v = daily[d]
-            items.append({"date": d, "expense": round(v["expense"], 2), "income": round(v["income"], 2)})
+            items.append({
+                "date": d,
+                "expense": round(v["expense"], 2),
+                "income": round(v["income"], 2),
+                "expense_items": to_items(v["expense_items"]),
+                "income_items": to_items(v["income_items"]),
+            })
         return {"items": items}
     finally:
         db.close()
@@ -2679,7 +2723,7 @@ def build_agent_tools(user_id: str) -> dict:
         amount_cny = round(amount * EXCHANGE_RATES.get(currency, 1.0), 2)
         category = args.get("category") or "其他"
         note = args.get("note") or ""
-        date = args.get("date") or today
+        date = _normalize_date(args.get("date") or today)
         entry_id = str(uuid.uuid4())
         amounts_json = json.dumps(
             [{"currency": currency, "amount": amount, "amount_cny": amount_cny}],

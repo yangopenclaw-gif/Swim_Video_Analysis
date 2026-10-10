@@ -109,7 +109,9 @@ data class ParseVoiceResponse(
 data class CalendarDayDto(
     val date: String = "",
     val expense: Double = 0.0,
-    val income: Double = 0.0
+    val income: Double = 0.0,
+    @SerialName("expense_items") val expenseItems: List<AmountItemDto> = emptyList(),
+    @SerialName("income_items") val incomeItems: List<AmountItemDto> = emptyList()
 )
 
 @Serializable

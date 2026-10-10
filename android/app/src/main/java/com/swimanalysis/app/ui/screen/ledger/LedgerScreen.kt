@@ -320,7 +320,7 @@ private fun CalendarView(
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(58.dp)
+                                .height(68.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                 .clickable { onDayClick(date) }
@@ -328,15 +328,25 @@ private fun CalendarView(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(dayNum.toString(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                            if (day != null && day.expense > 0) {
-                                Text("-${formatAmount(day.expense)}", style = MaterialTheme.typography.labelSmall, color = ExpenseRed, maxLines = 1)
-                            }
-                            if (day != null && day.income > 0) {
-                                Text("+${formatAmount(day.income)}", style = MaterialTheme.typography.labelSmall, color = IncomeGreen, maxLines = 1)
+                            if (day != null) {
+                                val expItems = if (day.expenseItems.isNotEmpty()) day.expenseItems
+                                else if (day.expense > 0) listOf(AmountItemDto("CNY", day.expense, day.expense))
+                                else emptyList()
+                                val incItems = if (day.incomeItems.isNotEmpty()) day.incomeItems
+                                else if (day.income > 0) listOf(AmountItemDto("CNY", day.income, day.income))
+                                else emptyList()
+                                expItems.forEach { item ->
+                                    val unit = if (item.currency == "CNY") "元" else LedgerCurrencies.name(item.currency)
+                                    Text("-${formatAmount(item.amount)}$unit", style = MaterialTheme.typography.labelSmall, color = ExpenseRed, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                incItems.forEach { item ->
+                                    val unit = if (item.currency == "CNY") "元" else LedgerCurrencies.name(item.currency)
+                                    Text("+${formatAmount(item.amount)}$unit", style = MaterialTheme.typography.labelSmall, color = IncomeGreen, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     } else {
-                        Box(modifier = Modifier.weight(1f).height(58.dp))
+                        Box(modifier = Modifier.weight(1f).height(68.dp))
                     }
                 }
             }
