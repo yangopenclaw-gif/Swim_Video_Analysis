@@ -9,6 +9,8 @@ import com.swimanalysis.app.data.api.AgentApi
 import com.swimanalysis.app.data.local.AuthStore
 import com.swimanalysis.app.data.model.AgentChatRequest
 import com.swimanalysis.app.data.model.ChatEvent
+import com.swimanalysis.app.data.model.DatabaseDetailResponse
+import com.swimanalysis.app.data.model.DatabaseOverviewDto
 import com.swimanalysis.app.data.model.DocParseResponse
 import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.NoteCreateRequest
@@ -128,6 +130,10 @@ class AgentRepository @Inject constructor(
         api.updateNote(id, NoteCreateRequest(title, content, date))
 
     suspend fun deleteNote(id: String) = api.deleteNote(id)
+
+    suspend fun listDatabases(): List<DatabaseOverviewDto> = api.listDatabases().databases
+
+    suspend fun getDatabase(key: String): DatabaseDetailResponse = api.getDatabase(key)
 
     fun streamChat(message: String, conversationId: String?): Flow<ChatEvent> = flow {
         val requestBody = json.encodeToString(AgentChatRequest(message, conversationId))

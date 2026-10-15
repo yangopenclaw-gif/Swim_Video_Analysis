@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.model.ChatAttachment
 import com.swimanalysis.app.data.model.ConversationDto
+import com.swimanalysis.app.data.model.DatabaseDetailResponse
+import com.swimanalysis.app.data.model.DatabaseOverviewDto
 import com.swimanalysis.app.data.repository.AgentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -36,7 +38,11 @@ data class ChatUiState(
     val docText: String = "",
     val docError: String? = null,
     val conversations: List<ConversationDto> = emptyList(),
-    val showHistory: Boolean = false
+    val showHistory: Boolean = false,
+    val databases: List<DatabaseOverviewDto> = emptyList(),
+
+    val databaseLoading: Boolean = false,
+    val currentDatabase: DatabaseDetailResponse? = null
 )
 
 @HiltViewModel
@@ -298,5 +304,36 @@ class ChatViewModel @Inject constructor(
 
     fun downloadAttachment(att: ChatAttachment) {
         repository.downloadAttachment(att.url, att.filename)
+    }
+
+
+    fun loadDatabases() {
+        if (_state.value.databaseLoading) return
+        _state.update { it.copy(databaseLoading = true) }
+        viewModelScope.launch {
+            try {
+                val dbs = repository.listDatabases()
+                _state.update { it.copy(databases = dbs, databaseLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(databaseLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun openDatabase(key: String) {
+        if (_state.value.databaseLoading) return
+        _state.update { it.copy(databaseLoading = true) }
+        viewModelScope.launch {
+            try {
+                val detail = repository.getDatabase(key)
+                _state.update { it.copy(currentDatabase = detail, databaseLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(databaseLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun closeDatabase() {
+        _state.update { it.copy(currentDatabase = null) }
     }
 }

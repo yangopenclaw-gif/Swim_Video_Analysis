@@ -201,6 +201,21 @@ class Document(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class Knowledge(Base):
+    __tablename__ = "knowledge"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    kind = Column(String, default="document")
+    title = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    mem_type = Column(String, nullable=True)
+    importance = Column(Float, nullable=True)
+    filename = Column(String, nullable=True)
+    chunk_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    last_accessed_at = Column(DateTime, nullable=True)
+
+
 class Note(Base):
     __tablename__ = "notes"
     id = Column(String, primary_key=True)
@@ -210,6 +225,22 @@ class Note(Base):
     note_date = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class SwimRecord(Base):
+    __tablename__ = "swim_records"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    swimmer_name = Column(String, nullable=False, index=True)
+    category = Column(String, default="训练")  # 比赛 / 训练
+    competition_name = Column(String, nullable=True)
+    event = Column(String, nullable=False)
+    race_date = Column(String, nullable=True)
+    age_label = Column(String, nullable=True)
+    result = Column(String, nullable=False)
+    rank = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 LEDGER_CATEGORIES = {
@@ -401,6 +432,81 @@ def _backfill_ledger_amounts():
 
 
 _backfill_ledger_amounts()
+
+
+def _migrate_knowledge_unify():
+    """统一知识库：把旧 memories/documents 回灌进 knowledge 表 + 向量库。"""
+    import sqlite3
+    conn = engine.raw_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        cur.execute("SELECT value FROM meta WHERE key='knowledge_unify_done'")
+        if cur.fetchone():
+            return
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = SessionLocal()
+    try:
+        existing = {k.id for k in db.query(Knowledge).all()}
+        for m in db.query(Memory).all():
+            kid = f"mem_{m.id}"
+            if kid in existing:
+                continue
+            db.add(Knowledge(
+                id=kid, user_id=m.user_id, kind="memory", title="记忆",
+                content=m.content, mem_type=m.mem_type, importance=m.importance,
+                chunk_count=1, created_at=m.created_at,
+                last_accessed_at=m.last_accessed_at,
+            ))
+        for d in db.query(Document).all():
+            if d.id in existing:
+                continue
+            db.add(Knowledge(
+                id=d.id, user_id=d.user_id, kind="document", title=d.title,
+                content=d.content, filename=d.filename, chunk_count=d.chunk_count,
+                created_at=d.created_at,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    def _backfill_vectors():
+        try:
+            from . import kb
+            s = SessionLocal()
+            try:
+                rows = s.query(Knowledge).all()
+            finally:
+                s.close()
+            for k in rows:
+                try:
+                    chunks = kb.chunk_text(k.content)
+                    if chunks:
+                        kb.add_chunks(k.user_id, DATA_DIR, k.id, k.title or "", chunks)
+                except Exception as e:
+                    logger.warning("知识向量回灌失败 id=%s: %s", k.id, e)
+            import sqlite3
+            conn = engine.raw_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('knowledge_unify_done', '1')"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            logger.info("知识库统一回灌完成")
+        except Exception as e:
+            logger.warning("知识库向量回灌后台任务失败: %s", e)
+
+    threading.Thread(target=_backfill_vectors, daemon=True).start()
+
+
+_migrate_knowledge_unify()
+
 
 db = SessionLocal()
 try:
@@ -2576,10 +2682,42 @@ def _is_duplicate(text: str, existing: List[str]) -> bool:
     return False
 
 
+def _knowledge_add(user_id: str, kind: str, title: str, content: str,
+                   doc_id: Optional[str] = None, mem_type: Optional[str] = None,
+                   importance: Optional[float] = None,
+                   filename: Optional[str] = None) -> Optional[str]:
+    """统一写入入口：切分 -> 向量化 -> 写 knowledge 表（事实源 + 向量索引同 doc_id 关联）。"""
+    content = (content or "").strip()
+    if not content:
+        return None
+    from . import kb
+    chunks = kb.chunk_text(content)
+    if not chunks:
+        return None
+    doc_id = doc_id or str(uuid.uuid4())
+    n = kb.add_chunks(user_id, DATA_DIR, doc_id, title or "", chunks)
+    db = SessionLocal()
+    try:
+        db.add(Knowledge(
+            id=doc_id, user_id=user_id, kind=kind, title=title or "",
+            content=content, mem_type=mem_type, importance=importance,
+            filename=filename, chunk_count=n
+        ))
+        db.commit()
+    finally:
+        db.close()
+    return doc_id
+
+
+def _knowledge_search(user_id: str, query: str, top_k: int = 5) -> List[dict]:
+    """统一检索入口：语义检索向量库，返回 [{title, content, doc_id}]。"""
+    from . import kb
+    return kb.search(user_id, DATA_DIR, query, top_k=top_k)
+
+
 def recall_memories(user_id: str, query: str, top_k: int = 5) -> List[str]:
     try:
-        from . import kb
-        results = kb.search(user_id, DATA_DIR, query, top_k=top_k)
+        results = _knowledge_search(user_id, query, top_k=top_k)
         contents = [r.get("content", "").strip() for r in results if (r.get("content") or "").strip()]
         if contents:
             return contents[:top_k]
@@ -2588,7 +2726,7 @@ def recall_memories(user_id: str, query: str, top_k: int = 5) -> List[str]:
 
     db = SessionLocal()
     try:
-        memories = db.query(Memory).filter(Memory.user_id == user_id).all()
+        memories = db.query(Knowledge).filter(Knowledge.user_id == user_id).all()
     finally:
         db.close()
     if not memories:
@@ -2596,9 +2734,9 @@ def recall_memories(user_id: str, query: str, top_k: int = 5) -> List[str]:
     q_toks = set(c for c in query if c.strip())
     scored = []
     for m in memories:
-        m_toks = set(c for c in m.content if c.strip())
+        m_toks = set(c for c in (m.content or "") if c.strip())
         overlap = len(q_toks & m_toks) if q_toks and m_toks else 0
-        scored.append((overlap + (m.importance or 0.0) * 2, m.content))
+        scored.append((overlap + (m.importance or 0.0) * 2, m.content or ""))
     scored.sort(key=lambda x: -x[0])
     return [c for _, c in scored[:top_k]]
 
@@ -2628,9 +2766,9 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
         if not isinstance(items, list):
             return
         db = SessionLocal()
-        new_memories: List[str] = []
+        new_memories: List[dict] = []
         try:
-            existing = [m.content for m in db.query(Memory).filter(Memory.user_id == user_id).all()]
+            existing = [m.content for m in db.query(Knowledge).filter(Knowledge.user_id == user_id).all()]
             for it in items:
                 if not isinstance(it, dict):
                     continue
@@ -2645,20 +2783,21 @@ async def extract_and_save_memories(user_id: str, user_text: str, assistant_text
                     continue
                 if _is_duplicate(content, existing):
                     continue
-                db.add(Memory(
-                    id=str(uuid.uuid4()), user_id=user_id,
-                    mem_type=it.get("type") or "semantic",
-                    content=content, importance=imp
-                ))
                 existing.append(content)
-                new_memories.append(content)
-            db.commit()
+                new_memories.append({
+                    "content": content,
+                    "mem_type": it.get("type") or "semantic",
+                    "importance": imp,
+                })
         finally:
             db.close()
-        if new_memories:
+        for mem in new_memories:
             try:
-                from . import kb
-                kb.add_chunks(user_id, DATA_DIR, f"mem_{uuid.uuid4()}", "记忆", new_memories)
+                _knowledge_add(
+                    user_id, "memory", "记忆", mem["content"],
+                    doc_id=f"mem_{uuid.uuid4()}",
+                    mem_type=mem["mem_type"], importance=mem["importance"],
+                )
             except Exception as e:
                 logger.warning("记忆向量化失败: %s", e)
     except Exception as e:
@@ -2860,8 +2999,7 @@ def build_agent_tools(user_id: str) -> dict:
         if not query:
             return {"error": "查询内容不能为空"}
         try:
-            from . import kb
-            chunks = kb.search(user_id, DATA_DIR, query, top_k=5)
+            chunks = _knowledge_search(user_id, query, top_k=5)
         except Exception as e:
             return {"error": f"知识库检索失败: {e}"}
         if not chunks:
@@ -2874,21 +3012,12 @@ def build_agent_tools(user_id: str) -> dict:
         if not content:
             return {"error": "内容不能为空"}
         try:
-            from . import kb
-            chunks = kb.chunk_text(content)
-            if not chunks:
-                return {"error": "无法解析出有效内容"}
-            doc_id = str(uuid.uuid4())
-            n = kb.add_chunks(user_id, DATA_DIR, doc_id, title, chunks)
+            doc_id = _knowledge_add(user_id, "document", title, content)
         except Exception as e:
             return {"error": f"知识存储失败: {e}"}
-        db = SessionLocal()
-        try:
-            db.add(Document(id=doc_id, user_id=user_id, title=title, content=content, chunk_count=n))
-            db.commit()
-        finally:
-            db.close()
-        return {"status": "ok", "message": f"已记住：{title}"}
+        if not doc_id:
+            return {"error": "无法解析出有效内容"}
+        return {"status": "ok", "message": f"已记住：{title}", "id": doc_id}
 
     async def note_add(args):
         title = (args.get("title") or "").strip()
@@ -2912,6 +3041,56 @@ def build_agent_tools(user_id: str) -> dict:
                 .order_by(Note.note_date.desc()).limit(50).all()
             return {"items": [{"id": n.id, "title": n.title, "content": n.content or "",
                                "date": n.note_date} for n in items]}
+        finally:
+            db.close()
+
+    async def record_swim_result(args):
+        swimmer = (args.get("swimmer_name") or "").strip()
+        event = (args.get("event") or "").strip()
+        result = (args.get("result") or "").strip()
+        if not swimmer or not event or not result:
+            return {"error": "选手姓名、项目、成绩均不能为空"}
+        category = args.get("category") or "训练"
+        if category not in ("比赛", "训练"):
+            category = "训练"
+        rid = str(uuid.uuid4())
+        db = SessionLocal()
+        try:
+            db.add(SwimRecord(
+                id=rid, user_id=user_id, swimmer_name=swimmer, category=category,
+                competition_name=args.get("competition_name") or None,
+                event=event, race_date=args.get("race_date") or None,
+                age_label=args.get("age_label") or None,
+                result=result, rank=args.get("rank") or None,
+                note=args.get("note") or None,
+            ))
+            db.commit()
+        finally:
+            db.close()
+        return {"status": "ok", "message": f"已记录 {swimmer} {event} {result}", "id": rid}
+
+    async def query_swim_result(args):
+        swimmer = args.get("swimmer_name")
+        event = args.get("event")
+        category = args.get("category")
+        db = SessionLocal()
+        try:
+            q = db.query(SwimRecord).filter(SwimRecord.user_id == user_id)
+            if swimmer:
+                q = q.filter(SwimRecord.swimmer_name == swimmer)
+            if event:
+                q = q.filter(SwimRecord.event.like(f"%{event}%"))
+            if category in ("比赛", "训练"):
+                q = q.filter(SwimRecord.category == category)
+            rows = q.order_by(SwimRecord.race_date.desc(), SwimRecord.created_at.desc()).limit(100).all()
+            items = [
+                {"id": r.id, "swimmer": r.swimmer_name, "category": r.category,
+                 "competition": r.competition_name or "", "event": r.event,
+                 "date": r.race_date or "", "age": r.age_label or "",
+                 "result": r.result, "rank": r.rank or "", "note": r.note or ""}
+                for r in rows
+            ]
+            return {"count": len(items), "items": items}
         finally:
             db.close()
 
@@ -3065,6 +3244,30 @@ def build_agent_tools(user_id: str) -> dict:
             "note_list", "查看记录本中的记录列表",
             {"type": "object", "properties": {}},
             note_list
+        ),
+        "record_swim_result": Tool(
+            "record_swim_result", "记录一条游泳成绩（比赛或训练）。游泳成绩是结构化数据，务必用此工具存储，不要用 kb_add。",
+            {"type": "object", "properties": {
+                "swimmer_name": {"type": "string", "description": "选手姓名，如 杨钧涵 或 杨涴婷"},
+                "event": {"type": "string", "description": "项目，如 50米自由泳"},
+                "result": {"type": "string", "description": "成绩，如 00:40.89"},
+                "category": {"type": "string", "enum": ["比赛", "训练"], "description": "比赛或训练，默认训练"},
+                "competition_name": {"type": "string", "description": "赛事名称（比赛时填写）"},
+                "race_date": {"type": "string", "description": "日期 YYYY-MM-DD"},
+                "age_label": {"type": "string", "description": "当时年龄，如 6岁11个月"},
+                "rank": {"type": "string", "description": "名次，如 第1名"},
+                "note": {"type": "string", "description": "备注"},
+            }, "required": ["swimmer_name", "event", "result"]},
+            record_swim_result
+        ),
+        "query_swim_result": Tool(
+            "query_swim_result", "查询游泳成绩记录，可按选手/项目/类别筛选",
+            {"type": "object", "properties": {
+                "swimmer_name": {"type": "string", "description": "按选手姓名筛选，如 杨钧涵"},
+                "event": {"type": "string", "description": "按项目筛选，如 自由泳"},
+                "category": {"type": "string", "enum": ["比赛", "训练"], "description": "按类别筛选"},
+            }},
+            query_swim_result
         ),
         "pdf_generate": Tool(
             "pdf_generate", "根据标题和文字内容生成一份中文 PDF 文档，返回下载链接",
@@ -3331,30 +3534,22 @@ async def agent_kb_upload(request: Request, user_id: str = Depends(get_current_u
     content = body.get("content") or ""
     if not content.strip():
         raise HTTPException(status_code=400, detail="内容不能为空")
-    from . import kb
-    chunks = kb.chunk_text(content)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="无法解析出有效内容")
-    doc_id = str(uuid.uuid4())
     try:
-        n = kb.add_chunks(user_id, DATA_DIR, doc_id, title, chunks)
+        doc_id = _knowledge_add(user_id, "document", title, content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"知识库写入失败（embedding 模型未就绪？）: {e}")
-    db = SessionLocal()
-    try:
-        db.add(Document(id=doc_id, user_id=user_id, title=title, content=content, chunk_count=n))
-        db.commit()
-    finally:
-        db.close()
-    return {"status": "ok", "id": doc_id, "chunk_count": n}
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="无法解析出有效内容")
+    return {"status": "ok", "id": doc_id}
 
 
 @app.get("/api/agent/kb/documents")
 async def agent_kb_documents(user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        docs = db.query(Document).filter(Document.user_id == user_id)\
-            .order_by(Document.created_at.desc()).all()
+        docs = db.query(Knowledge).filter(
+            Knowledge.user_id == user_id, Knowledge.kind == "document"
+        ).order_by(Knowledge.created_at.desc()).all()
         return {"items": [
             {"id": d.id, "title": d.title, "chunk_count": d.chunk_count,
              "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None}
@@ -3368,7 +3563,9 @@ async def agent_kb_documents(user_id: str = Depends(get_current_user_id)):
 async def agent_kb_delete(doc_id: str, user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        d = db.query(Document).filter(Document.id == doc_id, Document.user_id == user_id).first()
+        d = db.query(Knowledge).filter(
+            Knowledge.id == doc_id, Knowledge.user_id == user_id, Knowledge.kind == "document"
+        ).first()
         if not d:
             raise HTTPException(status_code=404, detail="文档不存在")
         db.delete(d)
@@ -3447,6 +3644,107 @@ async def agent_delete_note(note_id: str, user_id: str = Depends(get_current_use
         db.delete(n)
         db.commit()
         return {"status": "ok"}
+    finally:
+        db.close()
+
+
+@app.get("/api/agent/databases")
+async def agent_databases(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        def _latest(model):
+            row = db.query(model).filter(model.user_id == user_id)\
+                .order_by(model.created_at.desc()).first()
+            return row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row and row.created_at else None
+        databases = [
+            {"key": "ledger", "name": "账单",
+             "count": db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id).count(),
+             "updated_at": _latest(LedgerEntry)},
+            {"key": "schedules", "name": "提醒",
+             "count": db.query(Schedule).filter(Schedule.user_id == user_id).count(),
+             "updated_at": _latest(Schedule)},
+            {"key": "notes", "name": "记录本",
+             "count": db.query(Note).filter(Note.user_id == user_id).count(),
+             "updated_at": _latest(Note)},
+            {"key": "knowledge", "name": "知识库",
+             "count": db.query(Knowledge).filter(Knowledge.user_id == user_id).count(),
+             "updated_at": _latest(Knowledge)},
+            {"key": "swim_records", "name": "游泳成绩",
+             "count": db.query(SwimRecord).filter(SwimRecord.user_id == user_id).count(),
+             "updated_at": _latest(SwimRecord)},
+        ]
+        return {"databases": databases}
+    finally:
+        db.close()
+
+
+@app.get("/api/agent/databases/{key}")
+async def agent_database_detail(key: str, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        items = []
+        name = ""
+        if key == "ledger":
+            name = "账单"
+            rows = db.query(LedgerEntry).filter(LedgerEntry.user_id == user_id)\
+                .order_by(LedgerEntry.entry_date.desc(), LedgerEntry.created_at.desc()).limit(200).all()
+            for e in rows:
+                sign = "-" if e.entry_type == "expense" else "+"
+                items.append({
+                    "id": e.id, "title": e.category or "",
+                    "highlight": f"{sign}{e.amount:.2f} {e.currency or 'CNY'}",
+                    "subtitle": e.note or "", "date": e.entry_date,
+                    "badge": "支出" if e.entry_type == "expense" else "收入",
+                })
+        elif key == "schedules":
+            name = "提醒"
+            rows = db.query(Schedule).filter(Schedule.user_id == user_id)\
+                .order_by(Schedule.remind_at.asc()).all()
+            for s in rows:
+                items.append({
+                    "id": s.id, "title": s.title, "highlight": s.remind_at,
+                    "subtitle": s.content or "", "date": s.remind_at, "badge": "提醒",
+                })
+        elif key == "notes":
+            name = "记录本"
+            rows = db.query(Note).filter(Note.user_id == user_id)\
+                .order_by(Note.note_date.desc(), Note.created_at.desc()).all()
+            for n in rows:
+                items.append({
+                    "id": n.id, "title": n.title, "highlight": "",
+                    "subtitle": n.content or "", "date": n.note_date, "badge": "记录",
+                })
+        elif key == "knowledge":
+            name = "知识库"
+            rows = db.query(Knowledge).filter(Knowledge.user_id == user_id)\
+                .order_by(Knowledge.created_at.desc()).limit(200).all()
+            for k in rows:
+                content = (k.content or "").strip()
+                title = (k.title or "").strip()
+                if k.kind == "memory":
+                    title = content[:30] + ("…" if len(content) > 30 else "")
+                items.append({
+                    "id": k.id, "title": title or "（无标题）",
+                    "highlight": "",
+                    "subtitle": content[:80] + ("…" if len(content) > 80 else ""),
+                    "date": k.created_at.strftime("%Y-%m-%d %H:%M:%S") if k.created_at else "",
+                    "badge": "记忆" if k.kind == "memory" else "文档",
+                })
+        elif key == "swim_records":
+            name = "游泳成绩"
+            rows = db.query(SwimRecord).filter(SwimRecord.user_id == user_id)\
+                .order_by(SwimRecord.race_date.desc(), SwimRecord.created_at.desc()).limit(200).all()
+            for r in rows:
+                comp = (r.competition_name or "").strip()
+                rank = (r.rank or "").strip()
+                sub = " | ".join(x for x in [comp, rank] if x)
+                items.append({
+                    "id": r.id, "title": r.event, "highlight": r.result,
+                    "subtitle": sub, "date": r.race_date or "", "badge": r.swimmer_name,
+                })
+        else:
+            raise HTTPException(status_code=404, detail="未知的数据集合")
+        return {"key": key, "name": name, "items": items}
     finally:
         db.close()
 

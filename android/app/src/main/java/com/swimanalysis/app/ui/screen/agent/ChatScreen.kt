@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,16 +43,19 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SuggestionChip
+
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -77,6 +81,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.swimanalysis.app.AppLockGuard
 import com.swimanalysis.app.data.model.ChatAttachment
+import com.swimanalysis.app.data.model.DatabaseDetailResponse
+import com.swimanalysis.app.data.model.DatabaseItem
+import com.swimanalysis.app.data.model.DatabaseOverviewDto
 import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
@@ -169,6 +176,11 @@ fun ChatScreen(
             TopAppBar(
                 title = { Text("小咩助手") },
                 actions = {
+                    DatabaseMenuButton(
+                        databases = state.databases,
+                        onLoad = viewModel::loadDatabases,
+                        onOpenDatabase = viewModel::openDatabase
+                    )
                     IconButton(onClick = { viewModel.toggleHistory(true) }) {
                         Icon(Icons.Filled.History, contentDescription = "历史会话")
                     }
@@ -184,10 +196,6 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            QuickActions(
-                onAction = { viewModel.send(it) },
-                enabled = !state.isSending
-            )
 
             if (state.messages.isEmpty() && state.streamingText.isBlank() && !state.isSending) {
                 EmptyState(Modifier.weight(1f))
@@ -231,6 +239,14 @@ fun ChatScreen(
             onSelect = viewModel::switchConversation,
             onDelete = viewModel::deleteConversation,
             onDismiss = { viewModel.toggleHistory(false) }
+        )
+    }
+
+    state.currentDatabase?.let { db ->
+        DatabaseDetailDialog(
+            detail = db,
+            loading = state.databaseLoading,
+            onBack = viewModel::closeDatabase
         )
     }
 
@@ -291,24 +307,7 @@ fun ChatScreen(
 }
 
 @Composable
-private fun QuickActions(onAction: (String) -> Unit, enabled: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        listOf("记一笔", "查账单", "本月统计", "提醒我").forEach { label ->
-            SuggestionChip(
-                onClick = { onAction(label) },
-                enabled = enabled,
-                label = { Text(label, style = MaterialTheme.typography.bodySmall) }
-            )
-        }
-    }
-}
 
-@Composable
 private fun EmptyState(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier.fillMaxWidth(),
@@ -808,6 +807,168 @@ private fun AttachMenuItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+@Composable
+private fun DatabaseMenuButton(
+    databases: List<DatabaseOverviewDto>,
+    onLoad: () -> Unit,
+    onOpenDatabase: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = {
+            onLoad()
+            expanded = true
+        }) {
+            Icon(Icons.Filled.Storage, contentDescription = "数据库", tint = WarmCoral)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (databases.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("加载中…") },
+                    onClick = { expanded = false }
+                )
+            } else {
+                databases.forEach { db ->
+                    DropdownMenuItem(
+                        text = { Text("${db.name} · ${db.count}") },
+                        onClick = {
+                            expanded = false
+                            onOpenDatabase(db.key)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatabaseDetailDialog(
+    detail: DatabaseDetailResponse,
+    loading: Boolean,
+    onBack: () -> Unit
+) {
+    Dialog(onDismissRequest = onBack) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(detail.name, style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "共 ${detail.items.size} 条记录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = onBack) { Text("关闭") }
+                }
+                Spacer(Modifier.height(8.dp))
+                if (loading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("加载中…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else if (detail.items.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "暂无数据",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 420.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(detail.items, key = { it.id }) { item ->
+                            DatabaseItemCard(item)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatabaseItemCard(item: DatabaseItem) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (item.badge.isNotBlank()) {
+                    Text(
+                        item.badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WarmCoral,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFFFE8DD))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    item.title.ifBlank { "（无标题）" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (item.date.isNotBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        item.date,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (item.highlight.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    item.highlight,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = WarmCoral,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (item.subtitle.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3
+                )
+            }
         }
     }
 }

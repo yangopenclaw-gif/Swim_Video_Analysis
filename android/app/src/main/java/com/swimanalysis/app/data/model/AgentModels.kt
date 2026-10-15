@@ -136,3 +136,32 @@ data class UploadFileResponse(
     @SerialName("file_id") val fileId: String = "",
     val filename: String = ""
 )
+@Serializable
+data class DatabaseOverviewDto(
+    val key: String = "",
+    val name: String = "",
+    val count: Int = 0,
+    @SerialName("updated_at") val updatedAt: String? = null
+)
+
+@Serializable
+data class DatabaseListResponse(
+    val databases: List<DatabaseOverviewDto> = emptyList()
+)
+
+@Serializable
+data class DatabaseItem(
+    val id: String = "",
+    val title: String = "",
+    val highlight: String = "",
+    val subtitle: String = "",
+    val date: String = "",
+    val badge: String = ""
+)
+
+@Serializable
+data class DatabaseDetailResponse(
+    val key: String = "",
+    val name: String = "",
+    val items: List<DatabaseItem> = emptyList()
+)

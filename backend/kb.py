@@ -1,6 +1,7 @@
 """Knowledge base: self-hosted embedding (BGE) + ChromaDB. Lazy heavy imports."""
 import os
 import logging
+import threading
 from typing import List
 
 logger = logging.getLogger("agent.kb")
@@ -8,24 +9,28 @@ logger = logging.getLogger("agent.kb")
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 _embedder = None
+_embedder_lock = threading.Lock()
 
 
 def _load_embedder():
     global _embedder
     if _embedder is not None:
         return _embedder
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as e:
-        logger.error("sentence-transformers 未安装，知识库不可用: %s", e)
-        return None
-    model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
-    try:
-        _embedder = SentenceTransformer(model_name)
-        logger.info("embedding 模型已加载: %s", model_name)
-    except Exception as e:
-        logger.error("embedding 模型加载失败: %s", e)
-        _embedder = None
+    with _embedder_lock:
+        if _embedder is not None:
+            return _embedder
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as e:
+            logger.error("sentence-transformers 未安装，知识库不可用: %s", e)
+            return None
+        model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+        try:
+            _embedder = SentenceTransformer(model_name)
+            logger.info("embedding 模型已加载: %s", model_name)
+        except Exception as e:
+            logger.error("embedding 模型加载失败: %s", e)
+            _embedder = None
     return _embedder
 
 
@@ -71,7 +76,7 @@ def search(user_id: str, data_dir: str, query: str, top_k: int = 5) -> List[dict
     out: List[dict] = []
     for i, doc in enumerate(docs[0]):
         meta = (metas[0][i] if i < len(metas[0]) else {}) or {}
-        out.append({"title": meta.get("title", ""), "content": doc})
+        out.append({"title": meta.get("title", ""), "content": doc, "doc_id": meta.get("doc_id", "")})
     return out
 
 

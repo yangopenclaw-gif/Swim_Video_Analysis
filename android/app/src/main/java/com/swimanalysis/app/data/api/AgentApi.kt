@@ -1,6 +1,8 @@
 package com.swimanalysis.app.data.api
 
 import com.swimanalysis.app.data.model.ConversationListResponse
+import com.swimanalysis.app.data.model.DatabaseDetailResponse
+import com.swimanalysis.app.data.model.DatabaseListResponse
 import com.swimanalysis.app.data.model.DocParseResponse
 import com.swimanalysis.app.data.model.DocumentListResponse
 import com.swimanalysis.app.data.model.ImageExtractResponse
@@ -74,4 +76,10 @@ interface AgentApi {
 
     @DELETE("/api/agent/notes/{id}")
     suspend fun deleteNote(@Path("id") id: String): Map<String, String>
+
+    @GET("/api/agent/databases")
+    suspend fun listDatabases(): DatabaseListResponse
+
+    @GET("/api/agent/databases/{key}")
+    suspend fun getDatabase(@Path("key") key: String): DatabaseDetailResponse
 }
