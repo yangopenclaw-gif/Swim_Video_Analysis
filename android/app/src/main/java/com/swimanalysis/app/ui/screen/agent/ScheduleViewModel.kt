@@ -26,9 +26,6 @@ class ScheduleViewModel @Inject constructor(
     private val _state = MutableStateFlow(ScheduleUiState())
     val state: StateFlow<ScheduleUiState> = _state.asStateFlow()
 
-    init {
-        load()
-    }
 
     fun load() {
         _state.update { it.copy(loading = true, error = null) }

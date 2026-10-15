@@ -1,6 +1,6 @@
 package com.swimanalysis.app.ui.screen.agent
 
-import android.net.Uri
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swimanalysis.app.data.model.ChatAttachment
@@ -29,14 +29,7 @@ data class ChatUiState(
     val streamingText: String = "",
     val statusText: String = "",
     val error: String? = null,
-    val imageExtracting: Boolean = false,
-    val extractedTitle: String = "",
-    val extractedText: String = "",
-    val imageError: String? = null,
-    val docParsing: Boolean = false,
-    val docFilename: String = "",
-    val docText: String = "",
-    val docError: String? = null,
+
     val conversations: List<ConversationDto> = emptyList(),
     val showHistory: Boolean = false,
     val databases: List<DatabaseOverviewDto> = emptyList(),
@@ -55,8 +48,7 @@ class ChatViewModel @Inject constructor(
 
     private var conversationId: String? = null
     private var streamJob: Job? = null
-    private var imageJob: Job? = null
-    private var docJob: Job? = null
+
 
     init {
         loadLatestConversation()
@@ -201,106 +193,6 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() = _state.update { it.copy(error = null) }
 
-    fun extractImage(uri: Uri) {
-        if (_state.value.imageExtracting) return
-        _state.update { it.copy(imageExtracting = true, imageError = null) }
-        imageJob = viewModelScope.launch {
-            try {
-                val text = repository.extractImage(uri)
-                _state.update { it.copy(imageExtracting = false, extractedText = text, extractedTitle = "") }
-            } catch (e: Exception) {
-                _state.update { it.copy(imageExtracting = false, imageError = e.message) }
-            }
-        }
-    }
-
-    fun setExtractedTitle(text: String) = _state.update { it.copy(extractedTitle = text) }
-    fun setExtractedText(text: String) = _state.update { it.copy(extractedText = text) }
-
-    fun saveExtractedToKb() {
-        val title = _state.value.extractedTitle.trim()
-        val content = _state.value.extractedText.trim()
-        if (content.isEmpty()) {
-            _state.update { it.copy(imageError = "抽取内容为空") }
-            return
-        }
-        viewModelScope.launch {
-            try {
-                repository.uploadDocument(title.ifBlank { "图片信息" }, content)
-                _state.update { it.copy(extractedTitle = "", extractedText = "", imageError = null) }
-            } catch (e: Exception) {
-                _state.update { it.copy(imageError = e.message) }
-            }
-        }
-    }
-
-    fun dismissImageResult() {
-        imageJob?.cancel()
-        _state.update {
-            it.copy(imageExtracting = false, extractedTitle = "", extractedText = "", imageError = null)
-        }
-    }
-
-    fun parseDocument(uri: Uri) {
-        if (_state.value.docParsing) return
-        _state.update { it.copy(docParsing = true, docError = null) }
-        docJob = viewModelScope.launch {
-            try {
-                val result = repository.parseDocument(uri)
-                _state.update {
-                    it.copy(docParsing = false, docFilename = result.filename, docText = result.text)
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(docParsing = false, docError = e.message) }
-            }
-        }
-    }
-
-    fun setDocText(text: String) = _state.update { it.copy(docText = text) }
-
-    fun saveDocToKb() {
-        val content = _state.value.docText.trim()
-        if (content.isEmpty()) {
-            _state.update { it.copy(docError = "解析内容为空") }
-            return
-        }
-        viewModelScope.launch {
-            try {
-                val title = _state.value.docFilename.ifBlank { "文档" }
-                repository.uploadDocument(title, content)
-                _state.update { it.copy(docFilename = "", docText = "", docError = null) }
-            } catch (e: Exception) {
-                _state.update { it.copy(docError = e.message) }
-            }
-        }
-    }
-
-    fun dismissDocResult() {
-        docJob?.cancel()
-        _state.update { it.copy(docParsing = false, docFilename = "", docText = "", docError = null) }
-    }
-
-    fun uploadImageAndAsk(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val resp = repository.uploadFile(uri)
-                send("我上传了一张图片，请帮我识别其中的内容并提炼要点（文件ID：${resp.fileId}）")
-            } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
-            }
-        }
-    }
-
-    fun uploadDocAndAsk(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val resp = repository.uploadFile(uri)
-                send("我上传了一个文档，请帮我解析并总结要点（文件ID：${resp.fileId}）")
-            } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
-            }
-        }
-    }
 
     fun downloadAttachment(att: ChatAttachment) {
         repository.downloadAttachment(att.url, att.filename)

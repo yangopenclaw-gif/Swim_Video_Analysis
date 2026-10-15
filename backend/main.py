@@ -243,6 +243,24 @@ class SwimRecord(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class FamilyMember(Base):
+    __tablename__ = "family_members"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    role = Column(String, nullable=False)
+    gender = Column(String, nullable=True)
+    birth_date = Column(String, nullable=True)
+    birth_date_note = Column(String, nullable=True)
+    id_card = Column(String, nullable=True)
+    passport_no = Column(String, nullable=True)
+    passport_issue = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 LEDGER_CATEGORIES = {
     "expense": ["自我消费", "请客吃饭", "娱乐", "餐饮", "交通", "购物", "居住", "医疗", "教育", "人情往来", "AI", "云机", "其他"],
     "income": ["工资", "奖金", "理财", "红包", "其他"]
@@ -3652,9 +3670,11 @@ async def agent_delete_note(note_id: str, user_id: str = Depends(get_current_use
 async def agent_databases(user_id: str = Depends(get_current_user_id)):
     db = SessionLocal()
     try:
-        def _latest(model):
-            row = db.query(model).filter(model.user_id == user_id)\
-                .order_by(model.created_at.desc()).first()
+        def _latest(model, extra=None):
+            q = db.query(model).filter(model.user_id == user_id)
+            if extra is not None:
+                q = q.filter(extra)
+            row = q.order_by(model.created_at.desc()).first()
             return row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row and row.created_at else None
         databases = [
             {"key": "ledger", "name": "账单",
@@ -3669,13 +3689,34 @@ async def agent_databases(user_id: str = Depends(get_current_user_id)):
             {"key": "knowledge", "name": "知识库",
              "count": db.query(Knowledge).filter(Knowledge.user_id == user_id).count(),
              "updated_at": _latest(Knowledge)},
-            {"key": "swim_records", "name": "游泳成绩",
-             "count": db.query(SwimRecord).filter(SwimRecord.user_id == user_id).count(),
-             "updated_at": _latest(SwimRecord)},
+            {"key": "family_members", "name": "家庭成员信息",
+             "count": db.query(FamilyMember).filter(FamilyMember.user_id == user_id).count(),
+             "updated_at": _latest(FamilyMember)},
+            {"key": "swim_yangyanting", "name": "杨涴婷游泳成绩",
+             "count": db.query(SwimRecord).filter(SwimRecord.user_id == user_id,
+                                                  SwimRecord.swimmer_name == "杨涴婷").count(),
+             "updated_at": _latest(SwimRecord, SwimRecord.swimmer_name == "杨涴婷")},
+            {"key": "swim_yanjunhan", "name": "杨钧涵游泳成绩",
+             "count": db.query(SwimRecord).filter(SwimRecord.user_id == user_id,
+                                                  SwimRecord.swimmer_name == "杨钧涵").count(),
+             "updated_at": _latest(SwimRecord, SwimRecord.swimmer_name == "杨钧涵")},
         ]
         return {"databases": databases}
     finally:
         db.close()
+
+
+def _age_from_birth(birth_date: str) -> str:
+    bd = (birth_date or "").strip()
+    if not bd:
+        return ""
+    try:
+        d = datetime.strptime(bd, "%Y-%m-%d")
+        today = datetime.now()
+        age = today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+        return f"{age}岁"
+    except ValueError:
+        return ""
 
 
 @app.get("/api/agent/databases/{key}")
@@ -3730,10 +3771,41 @@ async def agent_database_detail(key: str, user_id: str = Depends(get_current_use
                     "date": k.created_at.strftime("%Y-%m-%d %H:%M:%S") if k.created_at else "",
                     "badge": "记忆" if k.kind == "memory" else "文档",
                 })
-        elif key == "swim_records":
-            name = "游泳成绩"
-            rows = db.query(SwimRecord).filter(SwimRecord.user_id == user_id)\
-                .order_by(SwimRecord.race_date.desc(), SwimRecord.created_at.desc()).limit(200).all()
+        elif key == "family_members":
+            name = "家庭成员信息"
+            rows = db.query(FamilyMember).filter(FamilyMember.user_id == user_id)\
+                .order_by(FamilyMember.sort_order.asc()).all()
+            for m in rows:
+                bd = (m.birth_date or "").strip()
+                parts = []
+                if (m.birth_date_note or "").strip():
+                    parts.append(m.birth_date_note.strip())
+                if (m.id_card or "").strip():
+                    parts.append("身份证 " + m.id_card.strip())
+                if (m.passport_no or "").strip():
+                    passport = "护照 " + m.passport_no.strip()
+                    if (m.passport_issue or "").strip():
+                        passport += "（" + m.passport_issue.strip() + "）"
+                    parts.append(passport)
+                if (m.note or "").strip():
+                    parts.append(m.note.strip())
+                items.append({
+                    "id": m.id, "title": m.name, "highlight": m.role,
+                    "subtitle": " · ".join(parts), "date": bd,
+                    "badge": _age_from_birth(bd) or m.role,
+                })
+        elif key in ("swim_records", "swim_yangyanting", "swim_yanjunhan"):
+            swimmer = {"swim_yangyanting": "杨涴婷", "swim_yanjunhan": "杨钧涵"}.get(key)
+            if key == "swim_yangyanting":
+                name = "杨涴婷游泳成绩"
+            elif key == "swim_yanjunhan":
+                name = "杨钧涵游泳成绩"
+            else:
+                name = "游泳成绩"
+            q = db.query(SwimRecord).filter(SwimRecord.user_id == user_id)
+            if swimmer:
+                q = q.filter(SwimRecord.swimmer_name == swimmer)
+            rows = q.order_by(SwimRecord.race_date.desc(), SwimRecord.created_at.desc()).limit(200).all()
             for r in rows:
                 comp = (r.competition_name or "").strip()
                 rank = (r.rank or "").strip()

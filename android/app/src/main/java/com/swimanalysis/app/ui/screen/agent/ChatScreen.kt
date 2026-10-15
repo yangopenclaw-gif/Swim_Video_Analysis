@@ -4,7 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
+
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,10 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddComment
-import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Description
+
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -111,36 +108,6 @@ fun ChatScreen(
         }
     }
 
-    var imageAsk by remember { mutableStateOf(false) }
-    var docAsk by remember { mutableStateOf(false) }
-    var showAttachMenu by remember { mutableStateOf(false) }
-
-    val imageLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            if (imageAsk) viewModel.uploadImageAndAsk(uri) else viewModel.extractImage(uri)
-            imageAsk = false
-        }
-    }
-
-    val docLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            if (docAsk) viewModel.uploadDocAndAsk(uri) else viewModel.parseDocument(uri)
-            docAsk = false
-        }
-    }
-
-    val docMimeTypes = arrayOf(
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "text/plain"
-    )
 
     fun launchVoice() {
         if (state.isSending) return
@@ -227,7 +194,7 @@ fun ChatScreen(
                     inputText = ""
                 },
                 onMic = { launchVoice() },
-                onAttach = { showAttachMenu = true },
+
                 onStopStreaming = { viewModel.stopStreaming() }
             )
         }
@@ -250,60 +217,7 @@ fun ChatScreen(
         )
     }
 
-    if (state.imageExtracting || state.extractedText.isNotBlank() || state.imageError != null) {
-        ImageExtractDialog(
-            extracting = state.imageExtracting,
-            title = state.extractedTitle,
-            text = state.extractedText,
-            error = state.imageError,
-            onTitleChange = viewModel::setExtractedTitle,
-            onTextChange = viewModel::setExtractedText,
-            onSave = viewModel::saveExtractedToKb,
-            onDismiss = viewModel::dismissImageResult
-        )
-    }
 
-    if (state.docParsing || state.docText.isNotBlank() || state.docError != null) {
-        DocParseDialog(
-            parsing = state.docParsing,
-            filename = state.docFilename,
-            text = state.docText,
-            error = state.docError,
-            onTextChange = viewModel::setDocText,
-            onSave = viewModel::saveDocToKb,
-            onDismiss = viewModel::dismissDocResult
-        )
-    }
-
-    if (showAttachMenu) {
-        AttachMenuDialog(
-            onImageKb = {
-                showAttachMenu = false
-                imageAsk = false
-                AppLockGuard.awaitingExternalActivity = true
-                imageLauncher.launch("image/*")
-            },
-            onImageAsk = {
-                showAttachMenu = false
-                imageAsk = true
-                AppLockGuard.awaitingExternalActivity = true
-                imageLauncher.launch("image/*")
-            },
-            onDocKb = {
-                showAttachMenu = false
-                docAsk = false
-                AppLockGuard.awaitingExternalActivity = true
-                docLauncher.launch(docMimeTypes)
-            },
-            onDocAsk = {
-                showAttachMenu = false
-                docAsk = true
-                AppLockGuard.awaitingExternalActivity = true
-                docLauncher.launch(docMimeTypes)
-            },
-            onDismiss = { showAttachMenu = false }
-        )
-    }
 }
 
 @Composable
@@ -432,7 +346,6 @@ private fun InputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMic: () -> Unit,
-    onAttach: () -> Unit,
     onStopStreaming: () -> Unit
 ) {
     Column(
@@ -462,13 +375,6 @@ private fun InputBar(
                 shape = RoundedCornerShape(24.dp)
             )
             Spacer(Modifier.width(8.dp))
-            IconButton(
-                onClick = onAttach,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Icon(Icons.Filled.AttachFile, contentDescription = "上传文件", tint = WarmCoral)
-            }
-            Spacer(Modifier.width(4.dp))
             if (isSending) {
                 IconButton(
                     onClick = onStopStreaming,
@@ -586,230 +492,6 @@ private fun HistoryDialog(
     }
 }
 
-@Composable
-private fun DocParseDialog(
-    parsing: Boolean,
-    filename: String,
-    text: String,
-    error: String?,
-    onTextChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text("文档解析", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    if (filename.isBlank()) "已从文档中提取文字，可编辑后加入知识库。"
-                    else "已解析「$filename」，可编辑后加入知识库。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-
-                if (parsing) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Text("正在解析文档…", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("取消") }
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("解析出的文字") },
-                        minLines = 5,
-                        maxLines = 10
-                    )
-                    error?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("取消") }
-                        Spacer(Modifier.width(8.dp))
-                        TextButton(onClick = onSave) { Text("添加到知识库") }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun ImageExtractDialog(
-    extracting: Boolean,
-    title: String,
-    text: String,
-    error: String?,
-    onTitleChange: (String) -> Unit,
-    onTextChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text("图片转知识", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "已从图片中提炼信息，可编辑后加入知识库。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-
-                if (extracting) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Text("正在识别图片…", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("取消") }
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = onTitleChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("标题（可选）") },
-                        singleLine = true
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("抽取的内容") },
-                        minLines = 4,
-                        maxLines = 8
-                    )
-                    error?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("取消") }
-                        Spacer(Modifier.width(8.dp))
-                        TextButton(onClick = onSave) { Text("添加到知识库") }
-                    }
-                }
-            }
-        }
-    }
-}
-@Composable
-private fun AttachMenuDialog(
-    onImageKb: () -> Unit,
-    onImageAsk: () -> Unit,
-    onDocKb: () -> Unit,
-    onDocAsk: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text("上传文件", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "选择要上传的内容及处理方式。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                AttachMenuItem(
-                    icon = Icons.Filled.AddPhotoAlternate,
-                    title = "图片转知识",
-                    subtitle = "识别图片并存入知识库",
-                    onClick = onImageKb
-                )
-                AttachMenuItem(
-                    icon = Icons.Filled.Description,
-                    title = "文档解析",
-                    subtitle = "解析文档文字并存入知识库",
-                    onClick = onDocKb
-                )
-                AttachMenuItem(
-                    icon = Icons.Filled.AutoAwesome,
-                    title = "让 LLM 识别图片",
-                    subtitle = "小咩自动识别并总结图片内容",
-                    onClick = onImageAsk
-                )
-                AttachMenuItem(
-                    icon = Icons.Filled.AutoAwesome,
-                    title = "让 LLM 解析文档",
-                    subtitle = "小咩自动解析并总结文档要点",
-                    onClick = onDocAsk
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AttachMenuItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = WarmCoral,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 @Composable
 private fun DatabaseMenuButton(
     databases: List<DatabaseOverviewDto>,

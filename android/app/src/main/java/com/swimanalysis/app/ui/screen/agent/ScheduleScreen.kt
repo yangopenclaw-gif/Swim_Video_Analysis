@@ -34,6 +34,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,8 @@ import java.time.format.DateTimeFormatter
 fun ScheduleScreen(viewModel: ScheduleViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     var viewMode by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) { viewModel.load() }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("提醒") }) }
