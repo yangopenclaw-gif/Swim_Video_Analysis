@@ -10,7 +10,7 @@ sealed class Screen(val route: String, val title: String) {
 
     data object Chat : Screen("chat", "助手")
     data object Ledger : Screen("ledger", "账单")
-    data object Stats : Screen("stats", "统计")
+
     data object Notes : Screen("notes", "记录本")
     data object Schedule : Screen("schedule", "提醒")
     data object AddEntry : Screen("add_entry?entryId={entryId}", "记一笔")
