@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,10 +31,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,11 +59,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swimanalysis.app.data.model.ScheduleDto
 import com.swimanalysis.app.ui.theme.WarmCoral
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.YearMonth
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,11 +75,21 @@ import java.time.format.DateTimeFormatter
 fun ScheduleScreen(viewModel: ScheduleViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     var viewMode by remember { mutableStateOf(0) }
+    var showAddDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.load() }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("提醒") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("提醒") },
+                actions = {
+                    IconButton(onClick = { showAddDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "添加提醒")
+                    }
+                }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -78,6 +105,162 @@ fun ScheduleScreen(viewModel: ScheduleViewModel = hiltViewModel()) {
                 1 -> ScheduleCalendarView(state, viewModel::delete)
             }
         }
+    }
+
+    if (showAddDialog) {
+        AddScheduleDialog(
+            onDismiss = { showAddDialog = false },
+            onCreate = { title, content, remindAt, repeat ->
+                viewModel.create(title, content, remindAt, repeat) { showAddDialog = false }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddScheduleDialog(
+    onDismiss: () -> Unit,
+    onCreate: (title: String, content: String, remindAt: String, repeat: String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf<LocalDate?>(null) }
+    var time by remember { mutableStateOf<LocalTime?>(null) }
+    var repeatOption by remember { mutableStateOf("none") }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text("添加提醒", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("标题") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("备注") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.weight(1f)) {
+                        Text(date?.format(DateTimeFormatter.ISO_LOCAL_DATE) ?: "选择日期")
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedButton(onClick = { showTimePicker = true }, modifier = Modifier.weight(1f)) {
+                        Text(time?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "选择时间")
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val options = listOf("none" to "单次", "daily" to "每天", "weekly" to "每周")
+                    options.forEach { (value, label) ->
+                        FilterChip(
+                            selected = repeatOption == value,
+                            onClick = { repeatOption = value },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val d = date
+                        val t = time
+                        when {
+                            title.isBlank() -> error = "请输入标题"
+                            d == null -> error = "请选择日期"
+                            t == null -> error = "请选择时间"
+                            else -> onCreate(
+                                title.trim(),
+                                content.trim(),
+                                "${d.format(DateTimeFormatter.ISO_LOCAL_DATE)} ${t.format(DateTimeFormatter.ofPattern("HH:mm"))}",
+                                repeatOption
+                            )
+                        }
+                    }) { Text("确定") }
+                }
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = date?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                    }
+                    showDatePicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = time?.hour ?: 9,
+            initialMinute = time?.minute ?: 0,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("选择时间") },
+            text = {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    TimePicker(state = timePickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    time = LocalTime.of(timePickerState.hour, timePickerState.minute)
+                    showTimePicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("取消") }
+            }
+        )
     }
 }
 

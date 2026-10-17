@@ -50,4 +50,16 @@ class ScheduleViewModel @Inject constructor(
             }
         }
     }
+
+    fun create(title: String, content: String, remindAt: String, repeat: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                repository.createSchedule(title, content, remindAt, repeat)
+                load()
+                onSuccess()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
 }
