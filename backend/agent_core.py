@@ -7,6 +7,18 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, AsyncIterator
 
 logger = logging.getLogger("agent.core")
 
+_WRITE_TOOLS = {
+    "schedule_add", "schedule_delete", "ledger_add",
+    "note_add", "kb_add", "record_swim_result",
+}
+_COMPLETION_HINTS = (
+    "已添加", "已写入", "已创建", "已保存", "已设置", "已帮你记", "记好了",
+)
+
+
+def _claims_completion(text: str) -> bool:
+    return any(h in text for h in _COMPLETION_HINTS)
+
 
 @dataclass
 class Tool:
@@ -60,6 +72,7 @@ async def run_agent(
       {"type": "error", "text": ...}
     """
     tool_specs = [t.to_openai() for t in tools.values()]
+    called_tools: set = set()
 
     try:
         for _ in range(max_iterations):
@@ -99,6 +112,7 @@ async def run_agent(
                     if tool is None:
                         result = json.dumps({"error": f"未知工具 {name}"}, ensure_ascii=False)
                     else:
+                        called_tools.add(name)
                         yield {"type": "tool", "name": name, "args": args}
                         result = await _call_handler(tool.handler, args)
                         try:
@@ -126,6 +140,20 @@ async def run_agent(
             if not final_text:
                 final_text = "抱歉，我暂时无法处理这个请求，请换个说法试试。"
                 yield {"type": "token", "text": final_text}
+
+            # 兜底：回复声称已完成写操作，但本轮未真正调用写工具 → 强制补一轮真实调用
+            if _claims_completion(final_text) and not (called_tools & _WRITE_TOOLS):
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "你上一条回复声称操作已完成，但检测到你并未调用任何写工具。"
+                        "请立即调用正确的工具真正执行该操作（如 schedule_add/ledger_add/note_add），"
+                        "禁止编造结果，不要输出客套话，直接调用工具。"
+                    ),
+                })
+                yield {"type": "status", "text": "正在执行操作…"}
+                continue
+
             yield {"type": "done"}
             return
     except Exception as e:
