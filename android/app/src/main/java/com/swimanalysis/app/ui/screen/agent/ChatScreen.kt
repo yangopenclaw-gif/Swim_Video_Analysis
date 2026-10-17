@@ -134,8 +134,18 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     val itemCount = state.messages.size + if (state.streamingText.isNotBlank()) 1 else 0
-    LaunchedEffect(itemCount) {
-        if (itemCount > 0) listState.animateScrollToItem(itemCount - 1)
+    var lastTick by remember { mutableStateOf(0) }
+    LaunchedEffect(state.scrollToBottomTick, itemCount) {
+        if (itemCount == 0) {
+            lastTick = state.scrollToBottomTick
+            return@LaunchedEffect
+        }
+        if (state.scrollToBottomTick != lastTick) {
+            listState.scrollToItem(itemCount - 1)
+        } else {
+            listState.animateScrollToItem(itemCount - 1)
+        }
+        lastTick = state.scrollToBottomTick
     }
 
     Scaffold(

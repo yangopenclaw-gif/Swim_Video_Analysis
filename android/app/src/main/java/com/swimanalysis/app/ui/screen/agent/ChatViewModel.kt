@@ -29,6 +29,7 @@ data class ChatUiState(
     val streamingText: String = "",
     val statusText: String = "",
     val error: String? = null,
+    val scrollToBottomTick: Int = 0,
 
     val conversations: List<ConversationDto> = emptyList(),
     val showHistory: Boolean = false,
@@ -62,7 +63,12 @@ class ChatViewModel @Inject constructor(
                     val latest = convs.first()
                     conversationId = latest.id
                     val msgs = repository.getMessages(latest.id)
-                    _state.update { it.copy(messages = msgs.map { m -> ChatUiMessage(m.role, m.content) }) }
+                    _state.update {
+                        it.copy(
+                            messages = msgs.map { m -> ChatUiMessage(m.role, m.content) },
+                            scrollToBottomTick = it.scrollToBottomTick + 1
+                        )
+                    }
                 }
             } catch (_: Exception) {
             }
@@ -107,7 +113,8 @@ class ChatViewModel @Inject constructor(
                     it.copy(
                         messages = msgs.map { m -> ChatUiMessage(m.role, m.content) },
                         streamingText = "", statusText = "", error = null,
-                        showHistory = false
+                        showHistory = false,
+                        scrollToBottomTick = it.scrollToBottomTick + 1
                     )
                 }
             } catch (_: Exception) {
