@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -238,7 +239,7 @@ private fun NoteEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "记一条" else "编辑记录") },
         text = {
-            Column {
+            Column(Modifier.imePadding()) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("标题") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = content, onValueChange = { content = it }, label = { Text("内容") }, maxLines = 4, modifier = Modifier.fillMaxWidth())

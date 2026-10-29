@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -137,7 +138,7 @@ private fun AddScheduleDialog(
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface
         ) {
-            Column(Modifier.padding(20.dp)) {
+            Column(Modifier.padding(20.dp).imePadding()) {
                 Text("添加提醒", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(16.dp))
 

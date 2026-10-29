@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -191,7 +192,7 @@ fun LedgerScreen(
             },
             title = { Text(if (editing) "验证身份" else "删除验证") },
             text = {
-                Column {
+                Column(Modifier.imePadding()) {
                     Text(
                         if (editing) "修改记录前请输入登录密码" else "删除记录前请输入登录密码",
                         style = MaterialTheme.typography.bodyMedium,

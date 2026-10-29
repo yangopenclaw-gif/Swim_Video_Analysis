@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -132,7 +133,7 @@ fun KbManagerDialog(
                 .heightIn(max = 520.dp)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp)
+                modifier = Modifier.padding(20.dp).imePadding()
             ) {
                 Text("个人知识库", style = MaterialTheme.typography.titleLarge)
                 Text(
