@@ -21,7 +21,7 @@ import logging
 import bcrypt
 import jwt
 
-from .swim_analyzer import SwimVideoAnalyzer
+
 from .agent_llm import chat as agent_llm_chat, stream_chat as agent_llm_stream, default_provider as agent_default_provider
 from .agent_core import Tool, run_agent
 
