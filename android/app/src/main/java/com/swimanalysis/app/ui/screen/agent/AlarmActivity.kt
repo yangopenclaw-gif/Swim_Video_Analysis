@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -130,7 +132,7 @@ class AlarmActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun AlarmScreen(
     title: String,
     content: String,
@@ -204,7 +206,7 @@ private fun AlarmScreen(
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun DismissButton(onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
@@ -223,7 +225,7 @@ private fun DismissButton(onDismiss: () -> Unit) {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun SnoozeButton(onSnooze: () -> Unit) {
     Box(
         modifier = Modifier
