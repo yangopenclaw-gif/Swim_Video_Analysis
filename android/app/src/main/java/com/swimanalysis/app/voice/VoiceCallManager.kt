@@ -41,21 +41,26 @@ class VoiceCallManager @Inject constructor(
     fun start(appId: String, roomId: String, userId: String, token: String, botUserId: String) {
         if (engine != null || appId.isBlank() || token.isBlank()) return
         botUid = botUserId
-        val config = EngineConfig()
-        config.context = context
-        config.appID = appId
-        engine = RTCEngine.createRTCEngine(config, engineHandler)
-        engine?.startAudioCapture()
-        val rtcRoom = engine?.createRTCRoom(roomId)
-        room = rtcRoom
-        rtcRoom?.setRTCRoomEventHandler(roomHandler)
-        val userInfo = UserInfo(userId, "")
-        val roomConfig = RTCRoomConfig(
-            ChannelProfile.CHANNEL_PROFILE_CHAT_ROOM,
-            null,
-            true, false, true, false
-        )
-        rtcRoom?.joinRoom(token, userInfo, true, roomConfig)
+        try {
+            val config = EngineConfig()
+            config.context = context
+            config.appID = appId
+            engine = RTCEngine.createRTCEngine(config, engineHandler)
+            engine?.startAudioCapture()
+            val rtcRoom = engine?.createRTCRoom(roomId)
+            room = rtcRoom
+            rtcRoom?.setRTCRoomEventHandler(roomHandler)
+            val userInfo = UserInfo(userId, "")
+            val roomConfig = RTCRoomConfig(
+                ChannelProfile.CHANNEL_PROFILE_CHAT_ROOM,
+                null,
+                true, false, true, false
+            )
+            rtcRoom?.joinRoom(token, userInfo, true, roomConfig)
+        } catch (e: Exception) {
+            _events.tryEmit(VoiceEvent.Error("语音引擎启动失败：${e.message}"))
+            stop()
+        }
     }
 
     fun stop() {

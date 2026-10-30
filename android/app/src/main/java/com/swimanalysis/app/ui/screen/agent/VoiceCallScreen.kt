@@ -146,8 +146,24 @@ fun VoiceCallScreen(
     viewModel: VoiceCallViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var micGranted by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var micDenied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        micGranted = granted
+        if (!granted) micDenied = true
+    }
 
-    LaunchedEffect(Unit) { viewModel.start() }
+    LaunchedEffect(micGranted) {
+        if (micGranted) viewModel.start()
+        else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
     Box(
         modifier = Modifier
@@ -210,6 +226,26 @@ fun VoiceCallScreen(
             state.error?.let {
                 Spacer(Modifier.height(12.dp))
                 Text("⚠ $it", color = Color(0xFFFFB86B), fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+            if (micDenied) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "需要麦克风权限才能和小咩语音通话\n请在权限弹窗中选择「允许」",
+                    color = Color(0xFF8899C4), fontSize = 13.sp, textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "重新请求权限",
+                    color = Color(0xFFFFB86B), fontSize = 14.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x1FFFFB86B))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .then(
+                            Modifier
+                        ),
+                    textAlign = TextAlign.Center
+                )
             }
             Spacer(Modifier.weight(1f))
             IconButton(
