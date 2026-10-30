@@ -14,6 +14,8 @@ import com.swimanalysis.app.data.model.NoteListResponse
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import com.swimanalysis.app.data.model.ScheduleListResponse
 import com.swimanalysis.app.data.model.UploadFileResponse
+import com.swimanalysis.app.data.model.VoiceSessionResponse
+import com.swimanalysis.app.data.model.VoiceStopRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -82,4 +84,10 @@ interface AgentApi {
 
     @GET("/api/agent/databases/{key}")
     suspend fun getDatabase(@Path("key") key: String): DatabaseDetailResponse
+
+    @POST("/api/voice/session")
+    suspend fun startVoiceSession(@Body body: Map<String, String>): VoiceSessionResponse
+
+    @POST("/api/voice/stop")
+    suspend fun stopVoiceSession(@Body body: VoiceStopRequest): Map<String, String>
 }

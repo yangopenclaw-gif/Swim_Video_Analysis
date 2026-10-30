@@ -16,6 +16,8 @@ import com.swimanalysis.app.data.model.KbUploadRequest
 import com.swimanalysis.app.data.model.NoteCreateRequest
 import com.swimanalysis.app.data.model.ScheduleCreateRequest
 import com.swimanalysis.app.data.model.UploadFileResponse
+import com.swimanalysis.app.data.model.VoiceSessionResponse
+import com.swimanalysis.app.data.model.VoiceStopRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +42,12 @@ class AgentRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     suspend fun listConversations() = api.listConversations().items
+
+    suspend fun startVoiceSession(conversationId: String?): VoiceSessionResponse =
+        api.startVoiceSession(mapOf("conversation_id" to (conversationId ?: "")))
+
+    suspend fun stopVoiceSession(taskId: String, roomId: String) =
+        api.stopVoiceSession(VoiceStopRequest(taskId, roomId))
 
     suspend fun getMessages(id: String) = api.getMessages(id).items
 

@@ -45,6 +45,7 @@ import com.swimanalysis.app.ui.screen.ledger.LedgerScreen
 import com.swimanalysis.app.ui.screen.agent.ChatScreen
 import com.swimanalysis.app.ui.screen.agent.NoteScreen
 import com.swimanalysis.app.ui.screen.agent.ScheduleScreen
+import com.swimanalysis.app.ui.screen.agent.VoiceCallScreen
 
 private data class BottomItem(
     val screen: Screen,
@@ -102,6 +103,7 @@ fun SwimNavHost() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Chat.route) { ChatScreen(navController) }
+            composable(Screen.VoiceCall.route) { VoiceCallScreen() }
             composable(Screen.Notes.route) { NoteScreen() }
             composable(Screen.Schedule.route) { ScheduleScreen() }
             composable(Screen.Ledger.route) { LedgerScreen(navController) }

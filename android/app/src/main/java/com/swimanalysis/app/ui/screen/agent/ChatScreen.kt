@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
@@ -84,6 +85,7 @@ import com.swimanalysis.app.data.model.DatabaseOverviewDto
 import com.swimanalysis.app.data.model.ConversationDto
 import com.swimanalysis.app.ui.theme.WarmCoral
 import com.swimanalysis.app.ui.theme.WarmPeach
+import com.swimanalysis.app.ui.navigation.Screen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,6 +155,11 @@ fun ChatScreen(
             TopAppBar(
                 title = { Text("小咩助手") },
                 actions = {
+                    IconButton(onClick = {
+                        if (!state.isSending) navController.navigate(Screen.VoiceCall.route)
+                    }) {
+                        Icon(Icons.Filled.Phone, contentDescription = "语音通话", tint = WarmCoral)
+                    }
                     DatabaseMenuButton(
                         databases = state.databases,
                         onLoad = viewModel::loadDatabases,

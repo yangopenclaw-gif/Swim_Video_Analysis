@@ -30,6 +30,22 @@ data class ChatAttachment(
 )
 
 @Serializable
+data class VoiceSessionResponse(
+    @SerialName("app_id") val appId: String = "",
+    @SerialName("room_id") val roomId: String = "",
+    @SerialName("task_id") val taskId: String = "",
+    @SerialName("user_id") val userId: String = "",
+    val token: String = "",
+    @SerialName("bot_user_id") val botUserId: String = ""
+)
+
+@Serializable
+data class VoiceStopRequest(
+    @SerialName("task_id") val taskId: String,
+    @SerialName("room_id") val roomId: String
+)
+
+@Serializable
 data class ConversationDto(
     val id: String = "",
     val title: String = "",
