@@ -33,6 +33,7 @@ object ScheduleAlarmManager {
                 Intent(context, ScheduleReceiver::class.java).apply {
                     putExtra("title", s.title)
                     putExtra("content", s.content)
+                    putExtra("id", s.id)
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
