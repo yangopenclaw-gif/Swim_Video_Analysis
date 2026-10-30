@@ -538,6 +538,9 @@ finally:
 
 app = FastAPI(title="泳娃比赛记录平台", version="3.1.0")
 
+from .voice_rtc import ROUTER as _voice_router  # noqa: E402
+app.include_router(_voice_router)
+
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
