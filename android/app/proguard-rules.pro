@@ -43,3 +43,7 @@
 
 # Compose
 -keep class androidx.compose.** { *; }
+# VolcEngineRTC：厂商可选接口(荣耀等)为 compileOnly，运行时按机型反射可用性探测
+-dontwarn com.hihonor.android.magicx.**
+-dontwarn com.ss.bytertc.**
+-keep class com.ss.bytertc.** { *; }
