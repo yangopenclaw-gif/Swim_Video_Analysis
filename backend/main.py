@@ -2721,23 +2721,31 @@ def load_core_memories(user_id: str, max_n: int = 8) -> List[str]:
 
 
 async def consolidate_profile(user_id: str) -> str:
-    """对近期全量对话跑巩固任务，生成/更新用户画像（行为统计式长期记忆）。"""
+    """对近期对话跑巩固任务，生成/更新用户画像（行为统计式长期记忆）。
+
+    首次巩固（无画像）覆盖全量历史做冷启动；已有画像则只增量看近 7 天。
+    """
     if not agent_default_provider():
         return ""
+    old_profile = get_profile(user_id)
     db = SessionLocal()
     try:
-        since = datetime.now() - timedelta(days=7)
-        msgs = db.query(Message).filter(
-            Message.user_id == user_id, Message.created_at >= since,
+        q = db.query(Message).filter(
+            Message.user_id == user_id,
             Message.role.in_(["user", "assistant"]),
-        ).order_by(Message.created_at.asc()).all()
+        )
+        if old_profile:
+            q = q.filter(Message.created_at >= datetime.now() - timedelta(days=7))
+            msgs = q.order_by(Message.created_at.asc()).all()
+        else:
+            msgs = q.order_by(Message.created_at.desc()).limit(200).all()
+            msgs = list(reversed(msgs))
     finally:
         db.close()
     if len(msgs) < 6:
-        return get_profile(user_id)
+        return old_profile
 
     transcript = "\n".join(f"{'用户' if m.role == 'user' else '小咩'}：{m.content[:200]}" for m in msgs[-80:])
-    old_profile = get_profile(user_id)
     prompt = (
         "你是记忆巩固引擎。根据用户的近期对话记录，生成或更新一份用户画像，用于让私人助手更好地服务他。\n"
         "画像应包含（没有信息的部分留空，不要编造）：\n"
