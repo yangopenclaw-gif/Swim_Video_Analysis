@@ -39,6 +39,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SwimAnalysis"
         android:usesCleartextTraffic="true"
+        tools:replace="android:appComponentFactory"
         tools:targetApi="31">
 
         <activity
