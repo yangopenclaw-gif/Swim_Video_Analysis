@@ -3476,6 +3476,35 @@ def build_agent_tools(user_id: str) -> dict:
     }
 
 
+CRASH_DIR = os.path.join(DATA_DIR, "crash")
+
+
+@app.post("/api/crash/report")
+async def crash_report(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json")
+    stack = str(body.get("stack") or "")[:12000]
+    if not stack:
+        raise HTTPException(status_code=400, detail="empty stack")
+    os.makedirs(CRASH_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    entry = {
+        "time": body.get("time") or datetime.now().isoformat(),
+        "version": body.get("version") or "",
+        "versionCode": body.get("versionCode") or 0,
+        "android": body.get("android") or "",
+        "model": body.get("model") or "",
+        "thread": body.get("thread") or "",
+        "stack": stack,
+    }
+    with open(os.path.join(CRASH_DIR, f"crash_{ts}.json"), "w", encoding="utf-8") as f:
+        json.dump(entry, f, ensure_ascii=False, indent=1)
+    logger.warning("客户端崩溃上报 v%s %s: %s", entry["version"], entry["model"], stack[:300])
+    return {"status": "ok"}
+
+
 @app.get("/api/agent/profile")
 async def agent_get_profile(user_id: str = Depends(get_current_user_id)):
     return {

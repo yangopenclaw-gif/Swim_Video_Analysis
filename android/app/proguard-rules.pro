@@ -46,4 +46,10 @@
 # VolcEngineRTC：厂商可选接口(荣耀等)为 compileOnly，运行时按机型反射可用性探测
 -dontwarn com.hihonor.android.magicx.**
 -dontwarn com.ss.bytertc.**
+# 对齐官方 APIExample keep 清单：SDK 内部 JNI/反射依赖这些包的原始类名，
+# 缺一即 native 崩溃(SIGSEGV)——Java try-catch 无法捕获
 -keep class com.ss.bytertc.** { *; }
+-keep class com.bytedance.** { *; }
+-keep class com.ss.** { *; }
+-keep class com.pandora.** { *; }
+-keep class log.** { *; }
