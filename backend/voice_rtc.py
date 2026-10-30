@@ -278,7 +278,10 @@ async def voice_llm(request: Request):
 
     today = datetime.now().strftime("%Y-%m-%d")
     memories = recall_memories(owner_user_id, last_user or "闲聊", top_k=3)
-    system = build_system_prompt(memories, today)
+    from .main import get_profile, load_core_memories
+    profile = get_profile(owner_user_id)
+    core = load_core_memories(owner_user_id)
+    system = build_system_prompt(memories, today, profile=profile, core=core)
     messages = [
         {"role": "system", "content": system},
         {"role": "system", "content": VOICE_PERSONA},

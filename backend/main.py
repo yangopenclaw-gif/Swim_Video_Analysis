@@ -216,6 +216,14 @@ class Knowledge(Base):
     last_accessed_at = Column(DateTime, nullable=True)
 
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    user_id = Column(String, primary_key=True)
+    profile_text = Column(Text, nullable=True)
+    consolidated_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class Note(Base):
     __tablename__ = "notes"
     id = Column(String, primary_key=True)
@@ -540,6 +548,11 @@ app = FastAPI(title="泳娃比赛记录平台", version="3.1.0")
 
 from .voice_rtc import ROUTER as _voice_router  # noqa: E402
 app.include_router(_voice_router)
+
+
+@app.on_event("startup")
+async def _start_profile_consolidation():
+    asyncio.create_task(_profile_consolidation_loop())
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -2671,7 +2684,142 @@ async def update_rate(currency: str, request: Request, user_id: str = Depends(ge
 # 个人智能体（Agent）：记忆 / 工具 / ReAct / 知识库 / 日程
 # ============================================================
 
-def build_system_prompt(memories: List[str], today_date: str) -> str:
+def get_profile(user_id: str) -> str:
+    db = SessionLocal()
+    try:
+        p = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        return (p.profile_text or "").strip() if p else ""
+    finally:
+        db.close()
+
+
+def _upsert_profile(user_id: str, text: str):
+    db = SessionLocal()
+    try:
+        p = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if p:
+            p.profile_text = text
+            p.consolidated_at = datetime.now()
+        else:
+            db.add(UserProfile(user_id=user_id, profile_text=text, consolidated_at=datetime.now()))
+        db.commit()
+    finally:
+        db.close()
+
+
+def load_core_memories(user_id: str, max_n: int = 8) -> List[str]:
+    db = SessionLocal()
+    try:
+        rows = db.query(Knowledge).filter(
+            Knowledge.user_id == user_id,
+            Knowledge.kind == "memory",
+            Knowledge.importance >= 0.8,
+        ).order_by(Knowledge.importance.desc()).limit(max_n).all()
+        return [r.content.strip() for r in rows if (r.content or "").strip()]
+    finally:
+        db.close()
+
+
+async def consolidate_profile(user_id: str) -> str:
+    """对近期全量对话跑巩固任务，生成/更新用户画像（行为统计式长期记忆）。"""
+    if not agent_default_provider():
+        return ""
+    db = SessionLocal()
+    try:
+        since = datetime.now() - timedelta(days=7)
+        msgs = db.query(Message).filter(
+            Message.user_id == user_id, Message.created_at >= since,
+            Message.role.in_(["user", "assistant"]),
+        ).order_by(Message.created_at.asc()).all()
+    finally:
+        db.close()
+    if len(msgs) < 6:
+        return get_profile(user_id)
+
+    transcript = "\n".join(f"{'用户' if m.role == 'user' else '小咩'}：{m.content[:200]}" for m in msgs[-80:])
+    old_profile = get_profile(user_id)
+    prompt = (
+        "你是记忆巩固引擎。根据用户的近期对话记录，生成或更新一份用户画像，用于让私人助手更好地服务他。\n"
+        "画像应包含（没有信息的部分留空，不要编造）：\n"
+        "1. 身份背景（职业、常驻地、家庭构成）\n"
+        "2. 偏好与习惯（饮食、语言、作息、沟通风格——喜欢长解释还是短结论）\n"
+        "3. 高频需求（最常用的功能，如记账/提醒/查账）\n"
+        "4. 近期关注的事（从对话主题归纳）\n"
+        f"\n【现有画像】\n{old_profile or '（暂无）'}\n"
+        f"\n【近7天对话记录（共{len(msgs)}条）】\n{transcript}\n"
+        "\n只返回JSON：{\"profile\": \"画像文本（200字以内，分点）\", \"changed\": true/false}。"
+        "changed 表示与现有画像相比是否有实质更新。"
+    )
+    try:
+        resp = await agent_llm_chat(
+            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=800
+        )
+        raw = resp.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            raw = raw.rsplit("```", 1)[0]
+        data = json.loads(raw)
+        new_profile = (data.get("profile") or "").strip()
+        if new_profile and (data.get("changed") or not old_profile):
+            _upsert_profile(user_id, new_profile)
+            return new_profile
+        elif old_profile:
+            db = SessionLocal()
+            try:
+                p = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+                if p:
+                    p.consolidated_at = datetime.now()
+                    db.commit()
+            finally:
+                db.close()
+            return old_profile
+        return new_profile
+    except Exception as e:
+        logger.warning("画像巩固失败: %s", e)
+        return old_profile
+
+
+async def _profile_consolidation_loop():
+    """启动时与每6小时检查：距上次巩固超24小时且有新对话的用户，后台巩固画像。"""
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                users = [u for (u,) in db.query(Message.user_id).distinct().all()]
+            finally:
+                db.close()
+            now = datetime.now()
+            for uid in users[:10]:
+                try:
+                    db = SessionLocal()
+                    try:
+                        p = db.query(UserProfile).filter(UserProfile.user_id == uid).first()
+                        last = p.consolidated_at if p else None
+                        if last and (now - last) < timedelta(hours=24):
+                            continue
+                        fresh = db.query(Message).filter(
+                            Message.user_id == uid,
+                            Message.created_at >= (last or datetime(1970, 1, 1)),
+                        ).count()
+                    finally:
+                        db.close()
+                    if fresh >= 4:
+                        await consolidate_profile(uid)
+                except Exception as e:
+                    logger.warning("用户 %s 画像巩固异常: %s", uid, e)
+        except Exception as e:
+            logger.warning("画像巩固循环异常: %s", e)
+        await asyncio.sleep(6 * 3600)
+
+
+def build_system_prompt(memories: List[str], today_date: str,
+                        profile: str = "", core: Optional[List[str]] = None) -> str:
+    profile_text = ""
+    if profile:
+        profile_text = "\n[用户画像（长期巩固，始终参考）]\n" + profile
+    core_text = ""
+    if core:
+        core_text = "\n[核心记忆（高重要性，常驻）]\n" + "\n".join(f"- {c}" for c in core)
     mem_text = ""
     if memories:
         mem_text = "\n[关于用户的长期记忆]\n" + "\n".join(f"- {m}" for m in memories)
@@ -2688,7 +2836,7 @@ def build_system_prompt(memories: List[str], today_date: str) -> str:
         f"时区换算（如埃及时间转北京时间）自行完成，不要停下来反问用户。\n"
         f"重要：当用户告诉你关于他/她自己的信息（偏好、习惯、目标、重要事实、约定等）时，"
         f"务必调用 kb_add 将其保存到知识库，不要只在对话中回应就丢掉。"
-        f"{mem_text}"
+        f"{profile_text}{core_text}{mem_text}"
     )
 
 
@@ -3320,6 +3468,20 @@ def build_agent_tools(user_id: str) -> dict:
     }
 
 
+@app.get("/api/agent/profile")
+async def agent_get_profile(user_id: str = Depends(get_current_user_id)):
+    return {
+        "profile": get_profile(user_id),
+        "core_memories": load_core_memories(user_id),
+    }
+
+
+@app.post("/api/agent/profile/consolidate")
+async def agent_consolidate_profile(user_id: str = Depends(get_current_user_id)):
+    profile = await consolidate_profile(user_id)
+    return {"profile": profile}
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(request: Request, user_id: str = Depends(get_current_user_id)):
     body = await request.json()
@@ -3352,7 +3514,9 @@ async def agent_chat(request: Request, user_id: str = Depends(get_current_user_i
         db.close()
 
     memories = recall_memories(user_id, text, top_k=5)
-    system = build_system_prompt(memories, today_date)
+    profile = get_profile(user_id)
+    core = load_core_memories(user_id)
+    system = build_system_prompt(memories, today_date, profile=profile, core=core)
     messages = [{"role": "system", "content": system}]
     for m in recent:
         messages.append({"role": m.role, "content": m.content})
