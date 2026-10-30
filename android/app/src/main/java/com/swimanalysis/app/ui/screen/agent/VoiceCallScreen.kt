@@ -90,6 +90,7 @@ class VoiceCallViewModel @Inject constructor(
                     is VoiceEvent.Connected -> _state.update { it.copy(phase = VoicePhase.TALKING) }
                     is VoiceEvent.Disconnected -> _state.update { it.copy(botOnline = false) }
                     is VoiceEvent.BotJoined -> _state.update { it.copy(botOnline = true, phase = VoicePhase.TALKING) }
+                    is VoiceEvent.BotAudioPublished -> _state.update { it.copy(botOnline = true) }
                     is VoiceEvent.Subtitle -> _state.update {
                         if (ev.fromBot) it.copy(botSubtitle = ev.text)
                         else it.copy(userSubtitle = ev.text)
@@ -108,8 +109,7 @@ class VoiceCallViewModel @Inject constructor(
                 val s = repository.startVoiceSession(null)
                 taskId = s.taskId
                 roomId = s.roomId
-                manager.start(s.appId, s.roomId, s.userId, s.token, s.botUserId)
-                _state.update { it.copy(phase = VoicePhase.TALKING) }
+                manager.start(s.appId, s.roomId, s.userId, s.token, s.botUserId, s.taskId)
             } catch (e: Exception) {
                 _state.update { it.copy(phase = VoicePhase.CLOSED, error = e.message ?: "连接失败") }
             }
@@ -117,9 +117,13 @@ class VoiceCallViewModel @Inject constructor(
     }
 
     fun end() {
+        if (_state.value.phase == VoicePhase.CLOSED) return
+        _state.update { VoiceUiState(phase = VoicePhase.CLOSED) }
+        val t = taskId
+        val r = roomId
+        taskId = null
+        roomId = null
         viewModelScope.launch {
-            val t = taskId
-            val r = roomId
             manager.stop()
             if (t != null && r != null) {
                 try {
@@ -127,9 +131,6 @@ class VoiceCallViewModel @Inject constructor(
                 } catch (_: Exception) {
                 }
             }
-            taskId = null
-            roomId = null
-            _state.update { VoiceUiState(phase = VoicePhase.CLOSED) }
         }
     }
 
@@ -144,6 +145,7 @@ class VoiceCallViewModel @Inject constructor(
 
 @Composable
 fun VoiceCallScreen(
+    navController: androidx.navigation.NavHostController,
     viewModel: VoiceCallViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -180,8 +182,9 @@ fun VoiceCallScreen(
             Text(
                 when {
                     state.phase == VoicePhase.CONNECTING -> "正在接通小咩…"
+                    state.error != null -> "连接异常"
                     state.botOnline -> "通话中 · 随时开口说"
-                    else -> "等待小咩上线…"
+                    else -> "已连接 · 等待小咩上线…"
                 },
                 color = Color(0xFF9FB0D8), fontSize = 15.sp
             )
@@ -265,7 +268,10 @@ fun VoiceCallScreen(
     }
 
     if (state.phase == VoicePhase.CLOSED) {
-        LaunchedEffect(Unit) { }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(1200)
+            navController.popBackStack()
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()

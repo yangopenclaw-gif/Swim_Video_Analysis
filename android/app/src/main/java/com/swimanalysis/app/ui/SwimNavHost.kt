@@ -103,7 +103,7 @@ fun SwimNavHost() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Chat.route) { ChatScreen(navController) }
-            composable(Screen.VoiceCall.route) { VoiceCallScreen() }
+            composable(Screen.VoiceCall.route) { VoiceCallScreen(navController) }
             composable(Screen.Notes.route) { NoteScreen() }
             composable(Screen.Schedule.route) { ScheduleScreen() }
             composable(Screen.Ledger.route) { LedgerScreen(navController) }

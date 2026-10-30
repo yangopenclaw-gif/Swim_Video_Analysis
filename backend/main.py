@@ -3477,6 +3477,27 @@ def build_agent_tools(user_id: str) -> dict:
 
 
 CRASH_DIR = os.path.join(DATA_DIR, "crash")
+VOICE_DIAG_DIR = os.path.join(DATA_DIR, "voice_diag")
+
+
+@app.post("/api/voice/diag")
+async def voice_diag(request: Request):
+    """客户端 RTC 诊断日志：进房状态/Bot上线/音频流/错误码全链路上报。"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json")
+    task_id = str(body.get("task_id") or "")[:64]
+    event = str(body.get("event") or "")[:64]
+    detail = str(body.get("detail") or "")[:1000]
+    if not event:
+        raise HTTPException(status_code=400, detail="empty event")
+    os.makedirs(VOICE_DIAG_DIR, exist_ok=True)
+    line = f"{datetime.now().strftime('%H:%M:%S')} task={task_id} {event} {detail}"
+    logger.warning("[VOICE_DIAG] %s", line)
+    with open(os.path.join(VOICE_DIAG_DIR, "diag.log"), "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    return {"status": "ok"}
 
 
 @app.post("/api/crash/report")
