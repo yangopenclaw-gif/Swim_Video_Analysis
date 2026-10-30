@@ -36,6 +36,9 @@ VOLC_SECRET_KEY = os.environ.get("VOLC_SECRET_ACCESS_KEY", "")
 VOLC_LLM_KEY = os.environ.get("VOLC_VOICE_LLM_KEY", "")
 VOLC_TTS_SPEAKER = os.environ.get("VOLC_VOICE_TTS_SPEAKER", "zh_female_linjianvhai_moon_bigtts")
 VOLC_LLM_URL_BASE = os.environ.get("VOLC_CUSTOM_LLM_URL", "").strip('"')
+VOLC_LLM_MODE = os.environ.get("VOLC_LLM_MODE", "custom").strip().lower()
+VOLC_ARK_MODEL = os.environ.get("VOLC_ARK_MODEL", "doubao-seed-2-0-lite-260428")
+VOLC_TTS_RESOURCE = os.environ.get("VOLC_TTS_RESOURCE", "seed-tts-2.0")
 
 OPENAPI_HOST = "rtc.volcengineapi.com"
 OPENAPI_VERSION = "2025-06-01"
@@ -158,17 +161,29 @@ async def volc_call(action: str, body: dict) -> dict:
 def build_start_body(room_id: str, task_id: str, user_id: str) -> dict:
     llm_url = f"{VOLC_LLM_URL_BASE}?task={task_id}"
     feature = {"Http": True} if llm_url.lower().startswith("http://") else None
-    llm_cfg: dict = {
-        "Mode": "CustomLLM",
-        "Url": llm_url,
-        "APIKey": VOLC_LLM_KEY,
-        "SystemMessages": [VOICE_PERSONA],
-        "HistoryLength": 8,
-        "MaxTokens": 512,
-        "Temperature": 0.3,
-    }
-    if feature:
-        llm_cfg["Feature"] = json.dumps(feature)
+    llm_cfg: dict
+    if VOLC_LLM_MODE == "ark":
+        llm_cfg = {
+            "Mode": "ArkV3",
+            "ModelName": VOLC_ARK_MODEL,
+            "SystemMessages": [VOICE_PERSONA],
+            "HistoryLength": 8,
+            "MaxTokens": 512,
+            "Temperature": 0.3,
+            "ThinkingType": "disabled",
+        }
+    else:
+        llm_cfg = {
+            "Mode": "CustomLLM",
+            "Url": llm_url,
+            "APIKey": VOLC_LLM_KEY,
+            "SystemMessages": [VOICE_PERSONA],
+            "HistoryLength": 8,
+            "MaxTokens": 512,
+            "Temperature": 0.3,
+        }
+        if feature:
+            llm_cfg["Feature"] = json.dumps(feature)
     return {
         "AppId": VOLC_APP_ID,
         "RoomId": room_id,
@@ -186,7 +201,7 @@ def build_start_body(room_id: str, task_id: str, user_id: str) -> dict:
             "TTSConfig": {
                 "Provider": "volcano_bidirection",
                 "ProviderParams": {
-                    "ResourceId": "seed-tts-2.0",
+                    "ResourceId": VOLC_TTS_RESOURCE,
                     "audio": {"voice_type": VOLC_TTS_SPEAKER, "speech_rate": 0},
                 },
             },
@@ -209,8 +224,10 @@ def get_current_user_id_dep(request: Request) -> str:
 
 @ROUTER.post("/session")
 async def voice_session(request: Request, user_id: str = Depends(get_current_user_id_dep)):
-    if not (VOLC_APP_ID and VOLC_APP_KEY and VOLC_ACCESS_KEY and VOLC_SECRET_KEY and VOLC_LLM_KEY and VOLC_LLM_URL_BASE):
+    if not (VOLC_APP_ID and VOLC_APP_KEY and VOLC_ACCESS_KEY and VOLC_SECRET_KEY):
         raise HTTPException(status_code=503, detail="语音服务未配置")
+    if VOLC_LLM_MODE != "ark" and not (VOLC_LLM_KEY and VOLC_LLM_URL_BASE):
+        raise HTTPException(status_code=503, detail="语音服务未配置(CustomLLM)")
     body = await request.json()
     room_id = f"room_{uuid.uuid4().hex[:10]}"
     task_id = f"task_{uuid.uuid4().hex[:10]}"
