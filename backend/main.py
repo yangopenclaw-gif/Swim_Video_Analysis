@@ -3500,6 +3500,29 @@ async def voice_diag(request: Request):
     return {"status": "ok"}
 
 
+@app.post("/api/voice/event")
+async def voice_event(request: Request):
+    """火山 VoiceChat 任务事件回调：控制台-功能配置-回调配置 指向此端点。
+
+    用于监控 StartVoiceChat 任务真实状态（ASR/LLM/TTS 启动成败、错误码），
+    全量落盘 raw body + 关键 header 供事后排查。
+    """
+    raw = await request.body()
+    headers = {k: v for k, v in request.headers.items()
+               if k.lower() in ("content-type", "x-signature", "x-timestamp", "authorization")}
+    os.makedirs(VOICE_DIAG_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = {
+        "time": ts,
+        "headers": headers,
+        "body": raw.decode("utf-8", "replace")[:8000],
+    }
+    with open(os.path.join(VOICE_DIAG_DIR, "event.log"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    logger.warning("[VOICE_EVENT] %s %s", ts, entry["body"][:500])
+    return {"code": 0}
+
+
 @app.post("/api/crash/report")
 async def crash_report(request: Request):
     try:
