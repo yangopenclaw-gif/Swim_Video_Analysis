@@ -112,7 +112,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    implementation("com.volcengine:VolcEngineRTC:3.60.102.4900")
+    implementation("com.volcengine:VolcEngineRTC:3.60.102.4900") {
+        exclude(group = "com.android.support")
+    }
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
